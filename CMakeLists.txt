@@ -196,7 +196,10 @@ CPMAddPackage(
 )
 
 # fmt
-CPMAddPackage("gh:fmtlib/fmt#11.0.2")
+# check if fmt is already a target
+if (NOT TARGET fmt::fmt)
+  CPMAddPackage("gh:fmtlib/fmt#11.0.2")
+endif()
 
 # range-v3
 CPMAddPackage("gh:ericniebler/range-v3#0.12.0")
