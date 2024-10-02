@@ -39,6 +39,7 @@ void run_nrg_master(const std::string &dir) {
     NRG_calculation<std::complex<double>> calc(mpi, std::move(workdir), embedded);
   else
     NRG_calculation<double> calc(mpi, std::move(workdir), embedded);
+  mpi.done();
 }
 
 void run_nrg_slave(boost::mpi::environment &mpienv, boost::mpi::communicator &mpiw) {
