@@ -113,14 +113,34 @@ auto diagonalisations_OpenMP(const Step &step, const Opch<S> &opch, const Coef<S
   return diagnew;
 }
 
+template<scalar S>
+auto diagonalisations_Local(const Step &step, const Opch<S> &opch, const Coef<S> &coef, const DiagInfo<S> &diagprev, const Output<S> &output,
+                            const std::vector<Invar> &tasks, const DiagParams &DP, const Symmetry<S> *Sym, const Params &P) {
+  DiagInfo<S> diagnew;
+  for (const auto &I : tasks) {
+    auto h = hamiltonian(step, I, opch, coef, diagprev, output, Sym, P); // non-const, consumed by diagonalise()
+    nrglog('(', "Diagonalizing " << I << " dim=" << dim(h));
+    auto e = diagonalise(h, DP, -1); // -1 = not using MPI
+    diagnew[I] = Eigen(std::move(e), step);
+  }
+  return diagnew;
+}
+
 // Build matrix H(ri;r'i') in each subspace and diagonalize it
 template<scalar S>
 auto diagonalisations(const Step &step, const Opch<S> &opch, const Coef<S> &coef, const DiagInfo<S> &diagprev,
                       const Output<S> &output, const std::vector<Invar> &tasks, const double diagratio,
                       const Symmetry<S> *Sym, MPI_diag &mpi, MemTime &mt, const Params &P) {
   const auto section_timing = mt.time_it("diag");
-  return P.diag_mode == "MPI" ? mpi.diagonalisations_MPI<S>(step, opch, coef, diagprev, output, tasks, DiagParams(P, diagratio), Sym, P)
-                              : diagonalisations_OpenMP(step, opch, coef, diagprev, output, tasks, DiagParams(P, diagratio), Sym, P);
+  if (P.embedded) {
+    return diagonalisations_Local(step, opch, coef, diagprev, output, tasks, DiagParams(P, diagratio), Sym, P);
+  }
+  else if (P.diag_mode == "MPI") {
+    return mpi.diagonalisations_MPI<S>(step, opch, coef, diagprev, output, tasks, DiagParams(P, diagratio), Sym, P);
+  }
+  else {
+    return diagonalisations_OpenMP(step, opch, coef, diagprev, output, tasks, DiagParams(P, diagratio), Sym, P);
+  }
 }
 
 template<scalar S>
