@@ -91,6 +91,7 @@ auto hamiltonian(const Step &step, const Invar &I, const Opch<S> &opch, const Co
   return h;
 }
 
+// Diagonalisation with OpenMP
 template<scalar S>
 auto diagonalisations_OpenMP(const Step &step, const Opch<S> &opch, const Coef<S> &coef, const DiagInfo<S> &diagprev, const Output<S> &output,
                              const std::vector<Invar> &tasks, const DiagParams &DP, const Symmetry<S> *Sym, const Params &P) {
@@ -113,6 +114,7 @@ auto diagonalisations_OpenMP(const Step &step, const Opch<S> &opch, const Coef<S
   return diagnew;
 }
 
+// Diagonalisation without any parallelization
 template<scalar S>
 auto diagonalisations_Local(const Step &step, const Opch<S> &opch, const Coef<S> &coef, const DiagInfo<S> &diagprev, const Output<S> &output,
                             const std::vector<Invar> &tasks, const DiagParams &DP, const Symmetry<S> *Sym, const Params &P) {
@@ -126,7 +128,8 @@ auto diagonalisations_Local(const Step &step, const Opch<S> &opch, const Coef<S>
   return diagnew;
 }
 
-// Build matrix H(ri;r'i') in each subspace and diagonalize it
+// Call different diagonalisation routines depending on the mode
+// Overload for the case where MPI or OpenMP is used
 template<scalar S>
 auto diagonalisations(const Step &step, const Opch<S> &opch, const Coef<S> &coef, const DiagInfo<S> &diagprev,
                       const Output<S> &output, const std::vector<Invar> &tasks, const double diagratio,
@@ -143,6 +146,8 @@ auto diagonalisations(const Step &step, const Opch<S> &opch, const Coef<S> &coef
   }
 }
 
+// Call different diagonalisation routines depending on the mode
+// Overload for the case where MPI is not used (used in TRIQS nrgljubljana_interface)
 template<scalar S>
 auto diagonalisations(const Step &step, const Opch<S> &opch, const Coef<S> &coef, const DiagInfo<S> &diagprev,
                       const Output<S> &output, const std::vector<Invar> &tasks, const double diagratio,
@@ -151,6 +156,8 @@ auto diagonalisations(const Step &step, const Opch<S> &opch, const Coef<S> &coef
   return diagonalisations_Local(step, opch, coef, diagprev, output, tasks, DiagParams(P, diagratio), Sym, P);
 }
 
+// Diagonalisation
+// Overload for the case where MPI is used
 template<scalar S>
 auto do_diag(const Step &step, const Operators<S> &operators, const Coef<S> &coef, Stats<S> &stats, const DiagInfo<S> &diagprev,
              const Output<S> &output, const TaskList &tasklist, const Symmetry<S> *Sym, MPI_diag &mpi, MemTime &mt, const Params &P) {
@@ -185,6 +192,8 @@ auto do_diag(const Step &step, const Operators<S> &operators, const Coef<S> &coe
   return diag;
 }
 
+// Diagonalisation
+// Overload for the case where MPI is not used
 template<scalar S>
 auto do_diag(const Step &step, const Operators<S> &operators, const Coef<S> &coef, Stats<S> &stats, const DiagInfo<S> &diagprev,
              const Output<S> &output, const TaskList &tasklist, const Symmetry<S> *Sym, MemTime &mt, const Params &P) {
@@ -315,6 +324,7 @@ void after_diag(const Step &step, Operators<S> &operators, Stats<S> &stats, Diag
 }
 
 // Perform one iteration step
+// Overload for the case of MPI
 template<scalar S>
 auto iterate(const Step &step, Operators<S> &operators, const Coef<S> &coef, Stats<S> &stats, const DiagInfo<S> &diagprev,
              Output<S> &output, Store<S> &store, Store<S> &store_all, Oprecalc<S> &oprecalc, const Symmetry<S> *Sym, MPI_diag &mpi, MemTime &mt, const Params &P) {
@@ -330,6 +340,7 @@ auto iterate(const Step &step, Operators<S> &operators, const Coef<S> &coef, Sta
   return diag;
 }
 
+// Overload for the case of no MPI (used in TRIQS nrgljubljana_interface)
 template<scalar S>
 auto iterate(const Step &step, Operators<S> &operators, const Coef<S> &coef, Stats<S> &stats, const DiagInfo<S> &diagprev,
              Output<S> &output, Store<S> &store, Store<S> &store_all, Oprecalc<S> &oprecalc, const Symmetry<S> *Sym, MemTime &mt, const Params &P) {
@@ -381,6 +392,8 @@ auto nrg_ZBW(Step &step, Operators<S> &operators, Stats<S> &stats, const DiagInf
   return diag;
 }
 
+// Main loop
+// Overload for the case where MPI is used
 template<scalar S>
 auto nrg_loop(Step &step, Operators<S> &operators, const Coef<S> &coef, Stats<S> &stats, const DiagInfo<S> &diag0,
               Output<S> &output, Store<S> &store, Store<S> &store_all, Oprecalc<S> &oprecalc, const Symmetry<S> *Sym, MPI_diag &mpi, MemTime &mt, const Params &P) {
@@ -391,6 +404,7 @@ auto nrg_loop(Step &step, Operators<S> &operators, const Coef<S> &coef, Stats<S>
   return diag;
 }
 
+// Overload for the case where MPI is not used (e.g., used in TRIQS nrgljubljana_interface)
 template<scalar S>
 auto nrg_loop(Step &step, Operators<S> &operators, const Coef<S> &coef, Stats<S> &stats, const DiagInfo<S> &diag0,
               Output<S> &output, Store<S> &store, Store<S> &store_all, Oprecalc<S> &oprecalc, const Symmetry<S> *Sym, MemTime &mt, const Params &P) {
