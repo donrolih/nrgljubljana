@@ -132,15 +132,23 @@ auto diagonalisations(const Step &step, const Opch<S> &opch, const Coef<S> &coef
                       const Output<S> &output, const std::vector<Invar> &tasks, const double diagratio,
                       const Symmetry<S> *Sym, MPI_diag &mpi, MemTime &mt, const Params &P) {
   const auto section_timing = mt.time_it("diag");
-  if (P.embedded) {
-    return diagonalisations_Local(step, opch, coef, diagprev, output, tasks, DiagParams(P, diagratio), Sym, P);
-  }
-  else if (P.diag_mode == "MPI") {
+  if (P.diag_mode == "MPI") {
     return mpi.diagonalisations_MPI<S>(step, opch, coef, diagprev, output, tasks, DiagParams(P, diagratio), Sym, P);
   }
-  else {
+  else if (P.diag_mode == "OpenMP") {
     return diagonalisations_OpenMP(step, opch, coef, diagprev, output, tasks, DiagParams(P, diagratio), Sym, P);
   }
+  else {
+    return diagonalisations_Local(step, opch, coef, diagprev, output, tasks, DiagParams(P, diagratio), Sym, P);
+  }
+}
+
+template<scalar S>
+auto diagonalisations(const Step &step, const Opch<S> &opch, const Coef<S> &coef, const DiagInfo<S> &diagprev,
+                      const Output<S> &output, const std::vector<Invar> &tasks, const double diagratio,
+                      const Symmetry<S> *Sym, MemTime &mt, const Params &P) {
+  const auto section_timing = mt.time_it("diag");
+  return diagonalisations_Local(step, opch, coef, diagprev, output, tasks, DiagParams(P, diagratio), Sym, P);
 }
 
 template<scalar S>
@@ -155,6 +163,40 @@ auto do_diag(const Step &step, const Operators<S> &operators, const Coef<S> &coe
       if (step.nrg()) {
         if (!(P.resume && P.laststored.has_value() && step.ndx() <= P.laststored.value()))
           diag = diagonalisations(step, operators.opch, coef, diagprev, output, tasklist.get(), diagratio, Sym, mpi, mt, P); // compute in first run
+        else
+          diag = DiagInfo<S>(step.ndx(), P, false); // or read from disk
+      }
+      if (step.dmnrg()) {
+        diag = DiagInfo<S>(step.ndx(), P, P.removefiles); // read from disk in second run
+        diag.subtract_GS_energy(stats.GS_energy);
+      }
+      stats.Egs = diag.Egs_subtraction();
+      Clusters<S> clusters(diag, P.fixeps);
+      truncate_prepare(step, diag, Sym->multfnc(), P);
+      break;
+    }
+    catch (NotEnough &e) {
+      fmt::print(fmt::emphasis::bold | fg(fmt::color::yellow), "Insufficient number of states computed.\n");
+      if (!(step.nrg() && P.restart)) break;
+      diagratio = std::min(diagratio * P.restartfactor, 1.0);
+      fmt::print(fmt::emphasis::bold | fg(fmt::color::yellow), "\nRestarting this iteration step. diagratio={}\n\n", diagratio);
+    }
+  }
+  return diag;
+}
+
+template<scalar S>
+auto do_diag(const Step &step, const Operators<S> &operators, const Coef<S> &coef, Stats<S> &stats, const DiagInfo<S> &diagprev,
+             const Output<S> &output, const TaskList &tasklist, const Symmetry<S> *Sym, MemTime &mt, const Params &P) {
+  step.infostring();
+  Sym->show_coefficients(step, coef);
+  double diagratio = P.diagratio; // non-const
+  DiagInfo<S> diag;
+  while (true) {
+    try {
+      if (step.nrg()) {
+        if (!(P.resume && P.laststored.has_value() && step.ndx() <= P.laststored.value()))
+          diag = diagonalisations(step, operators.opch, coef, diagprev, output, tasklist.get(), diagratio, Sym, mt, P); // compute in first run
         else
           diag = DiagInfo<S>(step.ndx(), P, false); // or read from disk
       }
@@ -288,6 +330,21 @@ auto iterate(const Step &step, Operators<S> &operators, const Coef<S> &coef, Sta
   return diag;
 }
 
+template<scalar S>
+auto iterate(const Step &step, Operators<S> &operators, const Coef<S> &coef, Stats<S> &stats, const DiagInfo<S> &diagprev,
+             Output<S> &output, Store<S> &store, Store<S> &store_all, Oprecalc<S> &oprecalc, const Symmetry<S> *Sym, MemTime &mt, const Params &P) {
+  SubspaceStructure substruct{diagprev, Sym};
+  TaskList tasklist{substruct};
+  if (P.h5raw && (P.h5all || (P.h5last && step.last())) && P.h5struct)
+    substruct.h5save(*output.h5raw, std::to_string(step.ndx()+1) + "/structure");
+  auto diag = do_diag(step, operators, coef, stats, diagprev, output, tasklist, Sym, mt, P);
+  after_diag(step, operators, stats, diag, output, substruct, store, store_all, oprecalc, Sym, mt, P);
+  operators.trim_matrices(diag);
+  diag.clear_eigenvectors();
+  mt.brief_report();
+  return diag;
+}
+
 // Perform calculations with quantities from 'data' file
 template<scalar S>
 void docalc0(Step &step, const Operators<S> &operators, const DiagInfo<S> &diag0, Stats<S> &stats, Output<S> &output,
@@ -330,6 +387,16 @@ auto nrg_loop(Step &step, Operators<S> &operators, const Coef<S> &coef, Stats<S>
   auto diag = diag0;
   for (step.init(); !step.end(); step.next())
     diag = iterate(step, operators, coef, stats, diag, output, store, store_all, oprecalc, Sym, mpi, mt, P);
+  step.set(step.lastndx());
+  return diag;
+}
+
+template<scalar S>
+auto nrg_loop(Step &step, Operators<S> &operators, const Coef<S> &coef, Stats<S> &stats, const DiagInfo<S> &diag0,
+              Output<S> &output, Store<S> &store, Store<S> &store_all, Oprecalc<S> &oprecalc, const Symmetry<S> *Sym, MemTime &mt, const Params &P) {
+  auto diag = diag0;
+  for (step.init(); !step.end(); step.next())
+    diag = iterate(step, operators, coef, stats, diag, output, store, store_all, oprecalc, Sym, mt, P);
   step.set(step.lastndx());
   return diag;
 }

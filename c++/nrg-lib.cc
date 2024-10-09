@@ -30,15 +30,12 @@ void run_nrg_master(boost::mpi::environment &mpienv, boost::mpi::communicator &m
 
 // Called from a third-party application
 void run_nrg_master(const std::string &dir) {
-  boost::mpi::environment mpienv;
-  boost::mpi::communicator mpiw;
-  MPI_diag mpi(mpienv, mpiw);
   auto workdir = set_workdir(dir);
   const bool embedded = true;
   if (complex_data())
-    NRG_calculation<std::complex<double>> calc(mpi, std::move(workdir), embedded);
+    NRG_calculation_embedded<std::complex<double>> calc(std::move(workdir), embedded);
   else
-    NRG_calculation<double> calc(mpi, std::move(workdir), embedded);
+    NRG_calculation_embedded<double> calc(std::move(workdir), embedded);
 }
 
 void run_nrg_slave(boost::mpi::environment &mpienv, boost::mpi::communicator &mpiw) {

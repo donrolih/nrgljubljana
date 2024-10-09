@@ -174,6 +174,82 @@ public:
   }
 };
 
+template <scalar S> class NRG_calculation_embedded {
+private:
+  Params P;
+  InputData<S> input;
+  std::shared_ptr<Symmetry<S>> Sym;
+  Stats<S> stats;
+  Store<S> store, store_all;
+  MemTime mt; // memory and timing statistics
+public:
+  auto run_nrg(const RUNTYPE runtype, Operators<S> operators, const Coef<S> &coef, DiagInfo<S> diag0) {
+    auto oprecalc = Oprecalc<S>(runtype, operators, Sym, mt, P);
+    auto output = Output<S>(runtype, operators, stats, P);
+    if (P.h5raw && P.h5all) {
+       diag0.h5save(*output.h5raw, std::to_string(P.Ninit) + "/eigen/");
+       operators.h5save(*output.h5raw, std::to_string(P.Ninit));
+    }
+    Step step{P, runtype};
+    // If calc0=true, a calculation of TD quantities is performed before starting the NRG iteration.
+    if (step.nrg() && P.calc0 && !P.ZBW())
+      docalc0(step, operators, diag0, stats, output, oprecalc, Sym.get(), mt, P);
+    auto diag = P.ZBW() ? nrg_ZBW(step, operators, stats, diag0, output, store, store_all, oprecalc, Sym.get(), mt, P)
+                        : nrg_loop(step, operators, coef, stats, diag0, output, store, store_all, oprecalc, Sym.get(), mt, P);
+    fmt::print(fmt::emphasis::bold | fg(fmt::color::red), FMT_STRING("\nTotal energy: {:.18}\n"), stats.total_energy);
+    stats.GS_energy = stats.total_energy;
+    if (step.nrg()) {
+      store.shift_abs_energies(stats.GS_energy);
+      if (P.dumpabsenergies) store.dump_all_absolute_energies();
+      if (P.dumpsubspaces) store.dump_subspaces();
+      if (P.h5raw) stats.h5save_nrg(*output.h5raw); // saved in raw.h5
+      if (P.h5raw && P.h5all)
+        store.h5save(*output.h5raw, "store");
+    }
+    if (step.dmnrg()) {
+      if (P.h5raw) stats.h5save_dmnrg(*output.h5raw); // saved in raw-dm.h5
+    }
+    fmt::print("\n** Iteration completed.\n\n");
+    return diag;
+  }
+  void calc_rho(const DiagInfo<S> &diag) {
+    Step step{P, RUNTYPE::NRG};
+    step.set_last();
+    auto rho = init_rho(step, diag, Sym.get(), P);
+    rho.save(step.lastndx(), P, fn_rho);
+    if (!P.ZBW()) calc_densitymatrix(rho, store_all, Sym.get(), mt, P);
+  }
+  void calc_rhoFDM() {
+    Step step{P, RUNTYPE::NRG};
+    step.set_last();
+    calc_ZnD(store, stats, Sym.get(), P);
+    if (P.logletter('w'))
+      report_ZnD(stats, P);
+    fdm_thermodynamics(store, stats, Sym.get(), P.T);
+    auto rhoFDM = init_rho_FDM(step.lastndx(), store, stats, Sym->multfnc(), P.T);
+    rhoFDM.save(step.lastndx(), P, fn_rhoFDM);
+    if (!P.ZBW()) calc_fulldensitymatrix(step, rhoFDM, store, store_all, stats, Sym.get(), mt, P);
+  }
+  NRG_calculation_embedded(std::unique_ptr<Workdir> workdir, const bool embedded) :
+    P("param", "param", std::move(workdir), embedded), input(P, "data"), Sym(input.Sym),
+    stats(P, Sym->get_td_fields(), input.GS_energy), store(P.Ninit, P.Nlen), store_all(P.Ninit, P.Nlen)
+  {
+    auto diag = run_nrg(RUNTYPE::NRG, input.operators, input.coef, input.diag);
+    if (P.dm) {
+      if (P.need_rho()) calc_rho(diag); // XXX: diag required here?
+      if (P.need_rhoFDM()) calc_rhoFDM();
+      run_nrg(RUNTYPE::DMNRG, input.operators, input.coef, input.diag);
+    }
+  }
+  NRG_calculation_embedded(const NRG_calculation_embedded &) = delete;
+  NRG_calculation_embedded(NRG_calculation_embedded &&) = delete;
+  NRG_calculation_embedded & operator=(const NRG_calculation_embedded &) = delete;
+  NRG_calculation_embedded & operator=(const NRG_calculation_embedded &&) = delete;
+  ~NRG_calculation_embedded() {
+    if (P.done) { std::ofstream D("DONE"); } // Indicate completion by creating a flag file
+  }
+};
+
 } // namespace
 
 #endif
