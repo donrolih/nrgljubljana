@@ -255,6 +255,23 @@ If[BAND == "manual_V",
   ];
 ];
 
+(* A new version of manual_V, for Nambu structure, can be complex! *)
+If[BAND == "manual_nambu",
+  Print["band=manual_nambu, importing V (hopping between impurity and the first shell of Wilson chain)"];
+  Module[{fnre, fnim, Vnnre, Vnnim},
+    Do[
+      fnre = "V" <> ToString[k] <> ToString[j] <> "-re" <> ".dat";
+      fnim = "V" <> ToString[k] <> ToString[j] <> "-im" <> ".dat";
+      Vnnre = Flatten[ImportTable[fnre]][[1]];
+      Vnnim = Flatten[ImportTable[fnim]][[1]];
+      Vnambu[k, j] = Chop[Vnnre] + I*Chop[Vnnim];
+      Print["V["<>ToString[k]<>","<>ToString[j]<>"]=", Vnambu[k, j]],
+      {k, 2}, {j, 2} 
+    ];
+  ];
+  thetaCh[CHANNELS] = 999.; (* Defined to make initial.m happy, and big to catch errors *) 
+];
+
 hook[BAND];
 
 (* This is called from maketable[]. *)
