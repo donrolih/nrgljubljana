@@ -271,6 +271,7 @@ snegrealconstants[delta, U, gammaPol, t];
 
 SetAttributes[gammaPolCh, NumericFunction];
 SetAttributes[hybV, NumericFunction];
+SetAttributes[hybVnambu, NumericFunction];
 SetAttributes[coefzeta,  NumericFunction];
 SetAttributes[coefrung, NumericFunction];
 SetAttributes[coefxi, NumericFunction];
@@ -294,7 +295,8 @@ discretization is set up. *)
 params = { 
     gammaPol        -> Sqrt[(1/Pi) theta0       gammaA], (* GP *)
     gammaPolCh[ch_] :> Sqrt[(1/Pi) theta0Ch[ch] gammaA],
-    hybV[i_,j_]     :> Sqrt[1/Pi] V[i,j],    
+    hybV[i_,j_]     :> Sqrt[1/Pi] V[i,j],
+    hybVnambu[i_,j_] :> Vnambu[i,j],
     coefzeta[ch_, j__] :> N[ bandrescale zeta[ch][j] ], (* channel index = 1,2,3 *)
     coefxi[ch_, j__]   :> N[ bandrescale xi[ch][j] ], (* N[] -> MachinePrecision! *)
     coefrung[ch_, j__]  :> N[ bandrescale zetaR[ch][j] ],
