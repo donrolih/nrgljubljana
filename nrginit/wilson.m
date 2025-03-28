@@ -1190,6 +1190,10 @@ If[TRI == "manual_nambu_new",
     loadtablescdelta[]; (* loaded from scdelta.dat *)
     loadtablesckappa[]; (* loaded from sckappa.dat *)
   ];
+  If[SYMTYPE == "SPU1",
+    loadtablescdelta[]; (* loaded from scdelta.dat *)
+    loadtablesckappa[]; (* loaded from sckappa.dat *)
+  ];
 ];
 
 If[paramexists["disccheck"],
