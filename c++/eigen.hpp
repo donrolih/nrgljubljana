@@ -45,7 +45,7 @@
 namespace NRG {
 
 inline constexpr std::string_view unitary_checkpoint_magic = "NRGLjubljana-unitary\n";
-inline constexpr std::uint32_t unitary_checkpoint_version = 1;
+inline constexpr std::uint32_t unitary_checkpoint_version = 2; // 2: Values carries dEdz
 inline constexpr std::uint32_t unitary_checkpoint_stage_replay_ready = 1;
 
 template<typename T>
@@ -99,10 +99,14 @@ class Values {
    std::vector<t_eigen> corrected; // these are referenced to Egs in current step (in the same way as rel_zero)
    std::vector<t_eigen> c; // criterion, value of "cost" function for truncation; constrols the sort order of states!!
    double c_shift = std::numeric_limits<double>::quiet_NaN(); // shift for criterion 'c'
+   // dE/dz for adaptive broadening, in the units of the current NRG shell and relative to a reference common to the
+   // shell, so only differences between states of one shell are meaningful. Empty unless adaptive_broadening is on.
+   std::vector<t_eigen> dedz;
   public:
    std::vector<t_eigen> & ref_v() { return v; }
    std::vector<t_eigen> & ref_corrected() { return corrected; }
    std::vector<t_eigen> & ref_c() { return c; }
+   std::vector<t_eigen> & ref_dEdz() { return dedz; }
    void resize(const size_t size) { 
      v.resize(size); 
      c.resize(size); 
@@ -115,6 +119,7 @@ class Values {
    [[nodiscard]] auto abs_T(const size_t i) const { assert(std::isfinite(T_shift)); return abs_zero(i) + T_shift; } // T_shift added
    [[nodiscard]] auto abs_G(const size_t i) const { assert(std::isfinite(abs_GS_energy)); return abs_T(i) - abs_GS_energy; } // abs_GS_energy subtracted
    [[nodiscard]] auto corr(const size_t i) const { return corrected[i]; }
+   [[nodiscard]] auto dEdz(const size_t i) const { assert(i < dedz.size()); return dedz[i]; }
    [[nodiscard]] auto size() const noexcept { return v.size(); }
    [[nodiscard]] auto lowest_rel() const { return v.front(); }
    [[nodiscard]] auto lowest_crit() const { return c.front(); }
@@ -146,6 +151,7 @@ class Values {
    [[nodiscard]] const auto & all_corr() const noexcept {
      return corrected;
    }
+   [[nodiscard]] const auto & all_dEdz() const noexcept { return dedz; }
     void set(const std::vector<t_eigen> &in) { v = in; }
     void set(std::vector<t_eigen> &&in) { v = std::move(in); }
    void set_scale(const double scale_) { scale = scale_; }
@@ -155,6 +161,7 @@ class Values {
    void set_abs_GS_energy(const double abs_GS_energy_) { abs_GS_energy = abs_GS_energy_; }
     void set_corr(const std::vector<t_eigen> &in) { corrected = in; }
     void set_corr(std::vector<t_eigen> &&in) { corrected = std::move(in); }
+    void set_dEdz(std::vector<t_eigen> in) { assert(in.size() == v.size()); dedz = std::move(in); }
    void do_shift(const double shift_) { shift_inplace(v,shift_); }
    void do_c_shift(const double shift_) { shift_inplace(c, shift_); }
    void do_corr_shift(const double shift_) { shift_inplace(corrected, shift_); }
@@ -171,11 +178,12 @@ class Values {
    [[nodiscard]] auto has_abs_G() const noexcept { return has_abs_T() && std::isfinite(abs_GS_energy); }
    [[nodiscard]] auto has_corr() const noexcept { return corrected.size() > 0; }
    [[nodiscard]] auto has_crit() const noexcept { return c.size() > 0; }
+   [[nodiscard]] auto has_dEdz() const noexcept { return dedz.size() > 0; }
    void save(boost::archive::binary_oarchive &oa) const {
-     oa << v << scale << shift << T_shift << abs_GS_energy << corrected << c;
+     oa << v << scale << shift << T_shift << abs_GS_energy << corrected << c << dedz;
    }
    void load(boost::archive::binary_iarchive &ia) {
-     ia >> v >> scale >> shift >> T_shift >> abs_GS_energy >> corrected >> c;
+     ia >> v >> scale >> shift >> T_shift >> abs_GS_energy >> corrected >> c >> dedz;
    }
    void h5save(H5Easy::File &fd, const std::string &name) const {
      h5_dump_vector(fd, name + "/value_orig", all_rel());
@@ -185,6 +193,7 @@ class Values {
      if (has_abs_G())    h5_dump_vector(fd, name + "/absenergyG",     all_abs_G()    | ranges::to_vector);
      if (has_corr())     h5_dump_vector(fd, name + "/value_corr",     all_corr());
      if (has_crit())     h5_dump_vector(fd, name + "/crit",           all_crit());
+     if (has_dEdz())     h5_dump_vector(fd, name + "/dEdz",           all_dEdz());
    }
 };
 
@@ -354,10 +363,12 @@ template <typename T, typename S>
 void perform_sort_by_c(std::vector<T>& c,
                        std::vector<T>& v,
                        std::vector<T>& corrected,
+                       std::vector<T>& dedz, // may be empty
                        EigenMatrix<S>& m) {
   const std::size_t n = c.size();
   assert(v.size() == n);
   assert(corrected.size() == n);
+  assert(dedz.empty() || dedz.size() == n);
   assert(static_cast<std::size_t>(m.rows()) == n);
   // Build permutation: p[i] = original index of the i-th smallest element of c
   std::vector<std::size_t> p(n);
@@ -382,6 +393,13 @@ void perform_sort_by_c(std::vector<T>& c,
   EigenMatrix<S> m_sorted(m.rows(), m.cols());
   for (std::size_t i = 0; i < n; ++i)
     m_sorted.row(static_cast<Eigen::Index>(i)) = m.row(static_cast<Eigen::Index>(p[i]));
+  if (!dedz.empty()) {
+    std::vector<T> dedz_sorted;
+    dedz_sorted.reserve(n);
+    for (std::size_t i = 0; i < n; ++i)
+      dedz_sorted.push_back(std::move(dedz[p[i]]));
+    dedz = std::move(dedz_sorted);
+  }
   c = std::move(c_sorted);
   v = std::move(v_sorted);
   corrected = std::move(corrected_sorted);
@@ -440,7 +458,7 @@ public:
   [[nodiscard]] auto value_corr_msr() const noexcept { return ranges::subrange(values.all_corr().begin(), values.all_corr().begin() + getnrstored()); } // range used in measurements (all or kept, depending on the moment of call)
   // Reordering
   void do_sort_by_c() {
-    perform_sort_by_c(values.ref_c(), values.ref_v(), values.ref_corrected(), vectors.ref_m());
+    perform_sort_by_c(values.ref_c(), values.ref_v(), values.ref_corrected(), values.ref_dEdz(), vectors.ref_m());
   }
   // Truncate to nrpost states.
   void truncate_prepare(const size_t nrpost_) {

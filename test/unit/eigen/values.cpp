@@ -46,6 +46,18 @@ TEST(Values, access) { // NOLINT
   EXPECT_DOUBLE_EQ(vz[4], 4.0);
 }
 
+TEST(Values, dEdz) { // NOLINT
+  Values<double> values;
+  values.set(std::vector{0.0, 1.0, 2.0});
+  EXPECT_FALSE(values.has_dEdz());
+  EXPECT_TRUE(values.all_dEdz().empty());
+  values.set_dEdz({0.0, -0.5, 0.25});
+  EXPECT_TRUE(values.has_dEdz());
+  EXPECT_EQ(values.all_dEdz().size(), 3);
+  EXPECT_EQ(values.dEdz(1), -0.5);
+  EXPECT_EQ(values.dEdz(2), 0.25);
+}
+
 int main(int argc, char **argv) {
    ::testing::InitGoogleTest(&argc, argv);
    return RUN_ALL_TESTS(); // NOLINT

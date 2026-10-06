@@ -96,6 +96,68 @@ TEST(Eigen, io) { // NOLINT
   EXPECT_DOUBLE_EQ(e.values.rel(0), 1.0); // original value
 }
 
+TEST(Eigen, io_dEdz) { // NOLINT
+  NRG::Eigen<double> e(2,2);
+  e.diagonal(EVEC{1.0, 2.0});
+  e.values.set_dEdz({0.5, -0.25});
+  std::ostringstream oss;
+  {
+    boost::archive::binary_oarchive oa(oss);
+    e.save(oa);
+  }
+  NRG::Eigen<double> loaded;
+  std::istringstream iss(oss.str());
+  boost::archive::binary_iarchive ia(iss);
+  loaded.load(ia);
+  ASSERT_TRUE(loaded.values.has_dEdz());
+  EXPECT_EQ(loaded.values.dEdz(0), 0.5);
+  EXPECT_EQ(loaded.values.dEdz(1), -0.25);
+}
+
+TEST(Eigen, io_without_dEdz) { // NOLINT
+  NRG::Eigen<double> e(2,2);
+  e.diagonal(EVEC{1.0, 2.0});
+  std::ostringstream oss;
+  {
+    boost::archive::binary_oarchive oa(oss);
+    e.save(oa);
+  }
+  NRG::Eigen<double> loaded;
+  std::istringstream iss(oss.str());
+  boost::archive::binary_iarchive ia(iss);
+  loaded.load(ia);
+  EXPECT_FALSE(loaded.values.has_dEdz());
+}
+
+TEST(Eigen, sort_by_c_permutes_dEdz) { // NOLINT
+  NRG::Eigen<double> e(3,3);
+  e.diagonal(EVEC{1.0, 2.0, 3.0});
+  e.values.set_corr(EVEC{1.0, 2.0, 3.0});
+  e.values.crit_copy_raw();
+  e.values.crit_negate(); // reverse the order
+  e.values.set_dEdz({10.0, 20.0, 30.0});
+  e.do_sort_by_c();
+  EXPECT_EQ(e.values.rel(0), 3.0);
+  EXPECT_EQ(e.values.dEdz(0), 30.0);
+  EXPECT_EQ(e.values.dEdz(1), 20.0);
+  EXPECT_EQ(e.values.dEdz(2), 10.0);
+}
+
+TEST(Eigen, hdf5io_dEdz) { // NOLINT
+  NRG::Eigen<double> e(2,2);
+  e.diagonal(EVEC{1.0, 2.0});
+  e.values.set_dEdz({0.5, -0.25});
+  {
+    auto h5 = H5Easy::File("Eigen-dEdz.h5", H5Easy::File::Overwrite);
+    e.h5save(h5, "test");
+    const auto dEdz = H5Easy::load<std::vector<double>>(h5, "test/dEdz");
+    ASSERT_EQ(dEdz.size(), 2);
+    EXPECT_EQ(dEdz[0], 0.5);
+    EXPECT_EQ(dEdz[1], -0.25);
+  }
+  std::filesystem::remove("Eigen-dEdz.h5");
+}
+
 TEST(Eigen, hdf5io) { // NOLINT
   NRG::Eigen<double> e(2,2);
   EVEC v1 = { 1.0, 2.0 };
