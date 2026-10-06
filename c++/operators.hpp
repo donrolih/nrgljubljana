@@ -274,6 +274,9 @@ class Operators {
    CustomOp<S> opt;  // triplet operators (dynamical spin susceptibility)
    CustomOp<S> opq;  // quadruplet operators (spectral functions for J=3/2)
    CustomOp<S> opot; // orbital triplet operators
+   // dH/dz for adaptive broadening: a singlet in the units of the current shell, relative to its ground-state value.
+   // Kept apart from ops, because it gains a new-site term each step (update_dHdz in core.hpp). Empty when unused.
+   MatrixElements<S> dHdz;
 
    // Dump diagonal matrix element values for max_nr states in each invariant subspace
    void dump_diagonal(const size_t max_nr, std::ostream &F = std::cout) const {
@@ -296,6 +299,7 @@ class Operators {
      opt.trim(diag);
      opq.trim(diag);
      opot.trim(diag);
+     dHdz.trim(diag);
    }
    void h5save(H5Easy::File &fd, const std::string &name) const {
      ops.h5save(fd, name + "/s");

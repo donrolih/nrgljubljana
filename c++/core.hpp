@@ -115,6 +115,19 @@ auto hamiltonian(const Step &step, const Invar &I, const Opch<S> &opch, const Co
   return h;
 }
 
+// New-site part of dH/dz in subspace I, for adaptive broadening: the hopping and on-site terms that make_matrix adds to
+// the Hamiltonian, built with the derivatives of the chain coefficients instead of the coefficients, in the units of
+// the current shell. Like the Hamiltonian, only the upper triangle is filled.
+template<scalar S>
+auto new_site_dHdz(const Step &step, const Invar &I, const Opch<S> &opch, const Coef<S> &dcoef,
+                   const DiagInfo<S> &diagprev, const Symmetry<S> *Sym) {
+  const auto anc = Sym->ancestors(I);
+  const SubspaceDimensions rm{I, anc, diagprev, Sym};
+  auto h = zero_matrix<S>(rm.total());
+  Sym->make_matrix(h, step, rm, I, anc, opch, dcoef);
+  return h;
+}
+
 template<scalar S>
 auto load_or_compute_diag(const Step &step, const Operators<S> &operators, const Coef<S> &coef, Stats<S> &stats, const DiagInfo<S> &diagprev,
                           Output<S> &output, const TaskList &tasklist, const Symmetry<S> *Sym, DiagEngine<S> *eng, MemTime &mt,
@@ -295,15 +308,49 @@ void recalculate_and_measure(const Step &step, Operators<S> &operators, Stats<S>
   calculate_spectral_and_expv(step, stats, output, oprecalc, diag, operators, store_all, mt, Sym, P);
 }
 
+// Adaptive broadening: dH/dz of shell N, for all states, from dH/dz of shell N-1 in its kept basis and the new-site
+// terms, dH_N/dz = sqrt(Lambda) dH_{N-1}/dz + (new-site terms with dcoef). The value of the ground state is subtracted,
+// so that only differences remain, as for the energies. The diagonal goes into Values as dE/dz (Hellmann-Feynman);
+// the matrix replaces operators.dHdz and is cut to the kept states by trim_matrices. Must run after split_in_blocks
+// (it uses the U blocks of all states) and before recalc_irreducible (it uses opch of the previous shell).
+template<scalar S, typename Matrix = Matrix_traits<S>, typename t_eigen = eigen_traits<S>>
+void update_dHdz(const Step &step, Operators<S> &operators, const Coef<S> &dcoef, const DiagInfo<S> &diagprev,
+                 DiagInfo<S> &diag, const SubspaceStructure &substruct, const Symmetry<S> *Sym, MemTime &mt, const Params &P) {
+  nrglog('@', "update_dHdz()");
+  const auto section_timing = mt.time_it("dHdz");
+  auto K = Sym->recalc_singlet(diag, substruct, operators.dHdz, 1); // an empty operator gives zero blocks
+  for (const auto &[I, eig] : diag) {
+    auto &k = K.at(Twoinvar(I, I));
+    k *= P.nrg_step_scale_factor();
+    const auto h = new_site_dHdz(step, I, operators.opch, dcoef, diagprev, Sym);
+    const Matrix V = eig.U.reconstruct(eig.getnrstored(), eig.getdim()); // rows: eigenstates
+    const Matrix W = V * h.template selfadjointView<::Eigen::Upper>();
+    k += W * V.adjoint();
+  }
+  const auto ground = ranges::min_element(diag, {}, [](const auto &a) { return a.second.values.lowest_rel(); });
+  const auto k0 = std::real(K.at(Twoinvar(ground->first, ground->first))(0, 0));
+  for (auto &[I, eig] : diag) {
+    auto &k = K.at(Twoinvar(I, I));
+    std::vector<t_eigen> dedz(size1(k));
+    for (const auto i : range0(size1(k))) {
+      k(i, i) -= k0;
+      dedz[i] = std::real(k(i, i));
+    }
+    eig.values.set_dEdz(std::move(dedz));
+  }
+  operators.dHdz = std::move(K);
+}
+
 template<scalar S>
 void after_diag(const Step &step, Operators<S> &operators, Stats<S> &stats, DiagInfo<S> &diag, Output<S> &output,
                 const SubspaceStructure &substruct, ThermoStore<S> &store, BackiterStore &store_all, Oprecalc<S> &oprecalc, const Symmetry<S> *Sym,
-                MemTime &mt, const Params &P) {
+                MemTime &mt, const Params &P, const DiagInfo<S> &diagprev, const Coef<S> *dcoef) {
   nrglog('@', "after_diag()");
   if (step.nrg()) {
     if (!diag.loaded_from_checkpoint())
       split_in_blocks(diag, substruct, true); // true = discard
     finalize_nrg_iteration_metadata(step, stats, diag, P);
+    if (dcoef) update_dHdz(step, operators, *dcoef, diagprev, diag, substruct, Sym, mt, P);
     persist_nrg_iteration_outputs(step, stats, diag, output, substruct, Sym, P);
   }
   if (P.do_recalc_all(step.get_runtype())) { // Either ...
@@ -328,13 +375,14 @@ void after_diag(const Step &step, Operators<S> &operators, Stats<S> &stats, Diag
 // Perform one iteration step
 template<scalar S>
 auto iterate(const Step &step, Operators<S> &operators, const Coef<S> &coef, Stats<S> &stats, const DiagInfo<S> &diagprev,
-             Output<S> &output, ThermoStore<S> &store, BackiterStore &store_all, Oprecalc<S> &oprecalc, const Symmetry<S> *Sym, DiagEngine<S> *eng, MemTime &mt, const Params &P) {
+             Output<S> &output, ThermoStore<S> &store, BackiterStore &store_all, Oprecalc<S> &oprecalc, const Symmetry<S> *Sym, DiagEngine<S> *eng, MemTime &mt, const Params &P,
+             const Coef<S> *dcoef) {
   SubspaceStructure substruct{diagprev, Sym};
   TaskList tasklist{substruct, !P.silent}; // verbose = !P.silent
   if (P.h5raw && (P.h5all || (P.h5last && step.last())) && P.h5struct)
     substruct.h5save(*output.h5raw, std::to_string(step.ndx()+1) + "/structure");
   auto diag = do_diag(step, operators, coef, stats, diagprev, output, tasklist, substruct, oprecalc, Sym, eng, mt, P);
-  after_diag(step, operators, stats, diag, output, substruct, store, store_all, oprecalc, Sym, mt, P);
+  after_diag(step, operators, stats, diag, output, substruct, store, store_all, oprecalc, Sym, mt, P, diagprev, dcoef);
   operators.trim_matrices(diag);
   diag.clear_eigenvectors();
   mt.brief_report();
@@ -354,11 +402,13 @@ void docalc0(Step &step, const Operators<S> &operators, const DiagInfo<S> &diag0
   if (P.checksumrules) operator_sumrules(operators, Sym);
 }
 
+// dcoef: derivative of the chain for adaptive broadening; nullptr when it is off and in the DM sweep.
 template<scalar S>
 auto nrg_loop(Step &step, Operators<S> &operators, const Coef<S> &coef, Stats<S> &stats, DiagInfo<S> diag,
-              Output<S> &output, ThermoStore<S> &store, BackiterStore &store_all, Oprecalc<S> &oprecalc, const Symmetry<S> *Sym, DiagEngine<S> *eng, MemTime &mt, const Params &P) {
+              Output<S> &output, ThermoStore<S> &store, BackiterStore &store_all, Oprecalc<S> &oprecalc, const Symmetry<S> *Sym, DiagEngine<S> *eng, MemTime &mt, const Params &P,
+              const Coef<S> *dcoef = nullptr) {
   for (step.init(); !step.end(); step.next())
-    diag = iterate(step, operators, coef, stats, diag, output, store, store_all, oprecalc, Sym, eng, mt, P);
+    diag = iterate(step, operators, coef, stats, diag, output, store, store_all, oprecalc, Sym, eng, mt, P, dcoef);
   step.set(step.lastndx());
   return diag;
 }

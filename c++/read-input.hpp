@@ -1,6 +1,7 @@
 #ifndef _read_input_hpp_
 #define _read_input_hpp_
 
+#include <algorithm>
 #include <cctype>
 #include <cstddef>
 #include <fstream>
@@ -134,6 +135,27 @@ private:
     };
     check_shape(coef.xi, coef_dz.xi, "xi");
     check_shape(coef.zeta, coef_dz.zeta, "zeta");
+    if (P.floquet) throw std::invalid_argument("adaptive_broadening is not supported with floquet.");
+    if (P.substeps) throw std::invalid_argument("adaptive_broadening is not supported with substeps.");
+    if (operators.ops.count("dHdz"))
+      throw std::invalid_argument("adaptive_broadening does not read dH/dz of the initial cluster (singlet dHdz) yet.");
+    // The coefficients inside the initial cluster (zeta_0..Ninit, xi_0..Ninit-1) enter the Hamiltonian from the data
+    // file, whose derivative is not available yet, so they must not depend on z. Differences at the round-off level
+    // of the chain are tolerated.
+    double scale = 0.0;
+    for (size_t ch = 0; ch < coef.xi.nr_tabs(); ch++)
+      for (size_t n = 0; n <= coef.xi.max(ch); n++) scale = std::max(scale, std::abs(coef.xi(n, ch)));
+    const auto tolerance = 1e-12 * scale;
+    const auto Ninit = size_t(P.Ninit);
+    const auto check_initial = [Ninit, tolerance](const auto &base, const auto &perturbed, const std::string &name, const size_t last) {
+      for (size_t ch = 0; ch < base.nr_tabs(); ch++)
+        for (size_t n = 0; n <= std::min(last, base.max(ch)); n++)
+          if (std::abs(perturbed(n, ch) - base(n, ch)) > tolerance)
+            throw std::invalid_argument(fmt::format("adaptive_broadening: {}_{} (table {}) depends on z, but it is part of the "
+                                                    "initial cluster (Ninit={}), whose dH/dz is not supported yet.", name, n, ch, Ninit));
+    };
+    check_initial(coef.zeta, coef_dz.zeta, "zeta", Ninit);
+    if (Ninit > 0) check_initial(coef.xi, coef_dz.xi, "xi", Ninit - 1);
   }
 
   void read_blocks(std::istream &fdata, Params &P) {

@@ -25,12 +25,13 @@ std::string base_data() {
 }
 
 // A D block with the layout of the z block of data_qs.txt (max index 4, one coefficient channel).
-std::string d_block(const std::string &header = "D -0.0025", const size_t maxindex = 4) {
+// zeta0 is the on-site energy of site 0 at z', which is part of the initial cluster.
+std::string d_block(const std::string &header = "D -0.0025", const size_t maxindex = 4, const double zeta0 = 0.0) {
   std::ostringstream ss;
   ss << header << "\n" << maxindex << "\n";
   for (size_t n = 0; n <= maxindex; n++) ss << 0.5 - 0.1 * double(n) << "\n";
   ss << maxindex << "\n";
-  for (size_t n = 0; n <= maxindex; n++) ss << 0.0 << "\n";
+  for (size_t n = 0; n <= maxindex; n++) ss << (n == 0 ? zeta0 : 0.0) << "\n";
   return ss.str();
 }
 
@@ -118,6 +119,12 @@ TEST(PerturbedChain, rejects_second_block) { // NOLINT
 
 TEST(PerturbedChain, rejects_shape_mismatch) { // NOLINT
   EXPECT_THROW(read_data(true, d_block("D -0.0025", 3)), std::invalid_argument);
+}
+
+TEST(PerturbedChain, rejects_z_dependent_initial_cluster) { // NOLINT
+  EXPECT_THROW(read_data(true, d_block("D -0.0025", 4, 0.01)), std::invalid_argument);
+  EXPECT_NO_THROW(read_data(true, d_block("D -0.0025", 4, 1e-17)));  // round-off level is tolerated
+  EXPECT_NO_THROW(read_data(false, d_block("D -0.0025", 4, 0.01))); // irrelevant with the switch off
 }
 
 TEST(PerturbedChain, rejects_superconducting_chain) { // NOLINT

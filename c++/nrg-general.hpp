@@ -159,7 +159,9 @@ private:
     run_phase(RUNTYPE::DMNRG, operators_seed, coef_seed, diag_seed);
   }
 
-  auto run_phase(const RUNTYPE runtype, const Operators<S> &operators_seed, const Coef<S> &coef, const DiagInfo<S> &diag_seed) {
+  // dcoef: derivative of the chain for adaptive broadening, only in the NRG sweep; nullptr otherwise.
+  auto run_phase(const RUNTYPE runtype, const Operators<S> &operators_seed, const Coef<S> &coef, const DiagInfo<S> &diag_seed,
+                 const Coef<S> *dcoef = nullptr) {
     auto operators = operators_seed;
     auto diag = diag_seed;
 
@@ -177,7 +179,7 @@ private:
       docalc0(step, operators, diag, stats, output, oprecalc, Sym.get(), mt, P);
 
     // Main iteration loop.
-    diag = nrg_loop(step, operators, coef, stats, std::move(diag), output, store, store_all, oprecalc, Sym.get(), eng.get(), mt, P);
+    diag = nrg_loop(step, operators, coef, stats, std::move(diag), output, store, store_all, oprecalc, Sym.get(), eng.get(), mt, P, dcoef);
 
     // Per-phase finalization.
     color_print(P.pretty_out, fmt::emphasis::bold | fg(fmt::color::red), FMT_STRING("\nTotal energy: {:.18}\n"), stats.total_energy);
@@ -208,6 +210,7 @@ public:
     auto operators_seed = std::move(input.operators);
     auto diag_seed = std::move(input.diag);
     auto coef_seed = std::move(input.coef);
+    auto dcoef_seed = std::move(input.dcoef);
 
     validate_cuda_diagonalisation_request(P.diag);
     validate_cuda_multiplication_request(P.mult);
@@ -215,7 +218,7 @@ public:
     warn_application_openmp_request(P.diag_mode, P.diagth);
     select_diag_engine();
 
-    auto diag = run_phase(RUNTYPE::NRG, operators_seed, coef_seed, diag_seed);
+    auto diag = run_phase(RUNTYPE::NRG, operators_seed, coef_seed, diag_seed, P.adaptive_broadening ? &dcoef_seed : nullptr);
     if (P.dm) {
       P.initialize_unitary_checkpoint_fingerprint();
       if (P.need_rho()) prepare_rho(diag);
