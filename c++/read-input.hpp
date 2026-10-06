@@ -184,8 +184,15 @@ private:
     }
   }
 
+  // d/dz of the chain coefficients, from the chain at z (z block) and at z + dz (D block)
+  void form_chain_derivative() {
+    dcoef.xi.set_difference_quotient(coef.xi, coef_dz.xi, dz.value());
+    dcoef.zeta.set_difference_quotient(coef.zeta, coef_dz.zeta, dz.value());
+  }
+
   void finalize_coefficients(Params &P, const DataHeader &header) {
     validate_perturbed_chain(P);
+    if (P.adaptive_broadening) form_chain_derivative();
     if (std::string(P.tri) == "cpp") Tridiag<S>(coef, header.Nmax, P);
     determine_Nmax_Nlen(coef, header.Nmax, P);
     P.validate_after_data_file();
@@ -207,11 +214,12 @@ public:
   Coef<S> coef;
   Coef<S> coef_dz;          // chain at z' = z + dz (D block), for adaptive broadening
   std::optional<double> dz; // set only if the data file has a D block
+  Coef<S> dcoef;            // d/dz of xi and zeta, formed only with adaptive_broadening
   double GS_energy = 0.0;
-  InputData(Params &P, std::istream &fdata) : coef(P), coef_dz(P) {
+  InputData(Params &P, std::istream &fdata) : coef(P), coef_dz(P), dcoef(P) {
     read(fdata, P);
   }
-  InputData(Params &P, const std::string &filename = "data") : coef(P), coef_dz(P) {
+  InputData(Params &P, const std::string &filename = "data") : coef(P), coef_dz(P), dcoef(P) {
     std::ifstream fdata(filename);
     if (!fdata) throw std::runtime_error(fmt::format("Can't load initial data from {}.", filename));
     read(fdata, P);

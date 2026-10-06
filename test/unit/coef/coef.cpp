@@ -41,6 +41,23 @@ TEST(Coef, parse) { // NOLINT
   EXPECT_EQ(coef.xi(0,0), 42.);
 }
 
+TEST(Coef, difference_quotient) { // NOLINT
+  // Binary fractions, so that the expected quotients are exact.
+  std::istringstream base_ss("1\n1.0\n0.5\n1\n-2.0\n4.0\n");    // two tables, max index 1
+  std::istringstream pert_ss("1\n1.125\n0.4375\n1\n-2.0\n3.0\n");
+  set_of_coef_tables<double> base, perturbed, derivative;
+  base.read(base_ss, 2);
+  perturbed.read(pert_ss, 2);
+  derivative.set_difference_quotient(base, perturbed, -0.5);  // backward step, z' = z - 0.5
+  EXPECT_EQ(derivative.nr_tabs(), 2);
+  EXPECT_EQ(derivative.max(0), 1);
+  EXPECT_EQ(derivative.max(1), 1);
+  EXPECT_EQ(derivative(0, 0), -0.25);
+  EXPECT_EQ(derivative(1, 0), 0.125);
+  EXPECT_EQ(derivative(0, 1), 0.0);
+  EXPECT_EQ(derivative(1, 1), 2.0);
+}
+
 TEST(Coef, truncated_matrix_table_header_throws) { // NOLINT
   std::istringstream ss("1 2");
   EXPECT_THROW(read_matrix_table<double>(ss), std::runtime_error);

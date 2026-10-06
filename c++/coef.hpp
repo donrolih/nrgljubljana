@@ -113,6 +113,18 @@ public:
     my_assert(alpha < tabs.size());
     tabs[alpha].set(N, val);
   }
+  // Table-by-table difference quotient (perturbed - base)/dz, the derivative of the chain with respect to z used by
+  // adaptive broadening. The shapes of base and perturbed must agree.
+  void set_difference_quotient(const set_of_coef_tables &base, const set_of_coef_tables &perturbed, const double dz) {
+    my_assert(base.nr_tabs() == perturbed.nr_tabs());
+    my_assert(dz != 0.0);
+    tabs.assign(base.nr_tabs(), coef_table<S>{});
+    for (t_ch alpha = 0; alpha < base.nr_tabs(); alpha++) {
+      my_assert(base.max(alpha) == perturbed.max(alpha));
+      for (t_ndx N = 0; N <= base.max(alpha); N++)
+        tabs[alpha].set(N, (perturbed(N, alpha) - base(N, alpha)) / dz);
+    }
+  }
 };
 
 template <scalar S>

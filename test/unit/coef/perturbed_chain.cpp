@@ -80,6 +80,18 @@ TEST(PerturbedChain, read_with_switch_on) { // NOLINT
   EXPECT_DOUBLE_EQ(input.coef_dz.xi(1, 0), 0.4);
   EXPECT_DOUBLE_EQ(input.coef_dz.zeta(4, 0), 0.0);
   EXPECT_DOUBLE_EQ(input.coef.xi(0, 0), 0.54528747084262258072); // the z block is untouched
+  // The derivative (xi(z') - xi(z))/dz, d_block() has xi(z') = 0.5 - 0.1 n and zeta(z') = 0
+  EXPECT_EQ(input.dcoef.xi.nr_tabs(), 1);
+  EXPECT_EQ(input.dcoef.xi.max(0), 4);
+  EXPECT_DOUBLE_EQ(input.dcoef.xi(0, 0), (0.5 - 0.54528747084262258072) / -0.0025);
+  EXPECT_DOUBLE_EQ(input.dcoef.xi(4, 0), (0.1 - 0.17491491876878190148) / -0.0025);
+  EXPECT_DOUBLE_EQ(input.dcoef.zeta(2, 0), 0.0);
+}
+
+TEST(PerturbedChain, no_derivative_with_switch_off) { // NOLINT
+  const auto run = read_data(false, d_block());
+  EXPECT_EQ(run.input->dcoef.xi.nr_tabs(), 0);
+  EXPECT_EQ(run.input->dcoef.zeta.nr_tabs(), 0);
 }
 
 TEST(PerturbedChain, read_but_unused_with_switch_off) { // NOLINT
