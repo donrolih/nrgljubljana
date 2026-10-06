@@ -9,7 +9,10 @@
 #define _abroaden_abroaden_hpp_
 
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <fstream>
+#include <iomanip>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
@@ -42,6 +45,9 @@ class AdaptiveBroaden {
    bool one = false;       // Nz=1: read <name> rather than 1/<name>
    bool with_imag = false; // records (omega, sigma, Re w, Im w) rather than (omega, sigma, Re w)
    double gamma_ratio = 0.1; // gamma = gamma_ratio * T (Eq. 21); the paper finds 0.1 typical
+   bool auto_gamma = false;      // choose gamma by the eps_rms scan (Sec. V.2)
+   double eps_threshold = 0.002; // threshold on eps_rms for the automatic gamma
+   const std::string scan_filename = "gamma_scan.dat";
    double sigma_min = 0.0;   // optional floor on sigma
    size_t jobs = 1;
    std::string name;
@@ -83,6 +89,9 @@ class AdaptiveBroaden {
        << " -o -- read <name> directly (Nz=1)\n"
        << " -I -- records with an imaginary part (reim=true in nrg); the real part is broadened\n"
        << " -x <ratio> -- gamma = ratio*T for the final -f' convolution (default 0.1)\n"
+       << " -X -- choose gamma automatically (Sec. V.2): scan gamma/T in [0.01, 1], write gamma_scan.dat, take the\n"
+       << "      smallest gamma at which eps_rms falls below the threshold\n"
+       << " -e <threshold> -- threshold on eps_rms for -X (default 0.002)\n"
        << " -S <sigma_min> -- floor on sigma (default none)\n";
    }
 
@@ -94,7 +103,7 @@ class AdaptiveBroaden {
      static const option long_options[] = {{"jobs", required_argument, nullptr, 'j'}, {nullptr, 0, nullptr, 0}};
      std::optional<size_t> requested_jobs;
      int c_;
-     while ((c_ = getopt_long(argc, argv, "vj:m:M:r:L:oIx:S:", long_options, nullptr)) != -1) {
+     while ((c_ = getopt_long(argc, argv, "vj:m:M:r:L:oIx:S:Xe:", long_options, nullptr)) != -1) {
        switch (c_) {
        case 'v': verbose = true; break;
        case 'j': requested_jobs = NRG::Tools::parse_positive_size(optarg, "Worker count"); break;
@@ -106,6 +115,8 @@ class AdaptiveBroaden {
        case 'I': with_imag = true; break;
        case 'x': gamma_ratio = std::atof(optarg); break;
        case 'S': sigma_min = std::atof(optarg); break;
+       case 'X': auto_gamma = true; break;
+       case 'e': eps_threshold = std::atof(optarg); break;
        default: throw std::invalid_argument("Unknown command-line option.");
        }
      }
@@ -130,6 +141,7 @@ class AdaptiveBroaden {
      if (!(Lambda > 1.0) || !std::isfinite(Lambda)) throw std::invalid_argument("Lambda must be finite and greater than 1.");
      if (!(gamma_ratio > 0.0) || !std::isfinite(gamma_ratio)) throw std::invalid_argument("The -x ratio must be finite and greater than 0.");
      if (!(sigma_min >= 0.0) || !std::isfinite(sigma_min)) throw std::invalid_argument("sigma_min must be finite and non-negative.");
+     if (!(eps_threshold > 0.0) || !std::isfinite(eps_threshold)) throw std::invalid_argument("The -e threshold must be finite and greater than 0.");
      std::cout << "Processing: " << name << std::endl;
    }
 
@@ -184,6 +196,114 @@ class AdaptiveBroaden {
      return result;
    }
 
+   // The -f' convolution of b at a single frequency x, with the quadrature of convolve() (broaden_common.hpp).
+   [[nodiscard]] double convolve_at(const std::vector<double> &b, const double x, const double sigma) const {
+     double sum = 0.0;
+     for (size_t j = 1; j + 1 < mesh.size(); j++) {
+       const auto width = (mesh[j + 1] - mesh[j - 1]) / 2.0;
+       sum += b[j] * derfd_kernel(x, mesh[j], sigma) * width;
+     }
+     return sum;
+   }
+
+   // eps_rms of Eq. 24: the normalized standard error of a least-squares quadratic fit through the points (x_i, y_i).
+   template<size_t n>
+   [[nodiscard]] static double eps_rms(const std::array<double, n> &x, const std::array<double, n> &y) {
+     static_assert(n > 3);
+     const auto scale = std::max(std::abs(x.front()), std::abs(x.back())); // fit in u = x/scale, for conditioning
+     std::array<double, 5> su{};                                          // sums of u^k, k = 0..4
+     std::array<double, 3> suy{};                                         // sums of u^k y, k = 0..2
+     for (size_t i = 0; i < n; i++) {
+       const auto u = x[i] / scale;
+       double uk = 1.0;
+       for (size_t k = 0; k < 5; k++) {
+         su[k] += uk;
+         if (k < 3) suy[k] += uk * y[i];
+         uk *= u;
+       }
+     }
+     // Normal equations sum_l su[k+l] c_l = suy[k], solved by Gaussian elimination with partial pivoting.
+     std::array<std::array<double, 4>, 3> m{};
+     for (size_t k = 0; k < 3; k++) {
+       for (size_t l = 0; l < 3; l++) m[k][l] = su[k + l];
+       m[k][3] = suy[k];
+     }
+     for (size_t col = 0; col < 3; col++) {
+       size_t pivot = col;
+       for (size_t r = col + 1; r < 3; r++)
+         if (std::abs(m[r][col]) > std::abs(m[pivot][col])) pivot = r;
+       std::swap(m[col], m[pivot]);
+       for (size_t r = col + 1; r < 3; r++) {
+         const auto f = m[r][col] / m[col][col];
+         for (size_t c = col; c < 4; c++) m[r][c] -= f * m[col][c];
+       }
+     }
+     std::array<double, 3> c{};
+     for (size_t k = 3; k-- > 0;) {
+       double v = m[k][3];
+       for (size_t l = k + 1; l < 3; l++) v -= m[k][l] * c[l];
+       c[k] = v / m[k][k];
+     }
+     double residual = 0.0, mean = 0.0;
+     for (size_t i = 0; i < n; i++) {
+       const auto u = x[i] / scale;
+       const auto fit = c[0] + c[1] * u + c[2] * u * u;
+       residual += (y[i] - fit) * (y[i] - fit);
+       mean += y[i];
+     }
+     mean /= n;
+     if (!(mean > 0.0))
+       throw std::runtime_error("The spectrum near omega=0 is not positive, so eps_rms is undefined; set gamma with -x.");
+     return std::sqrt(residual / (n - 3)) / mean;
+   }
+
+   // Automatic gamma (Sec. V.2 of the paper): for gamma/T on a logarithmic grid over [0.01, 1], the -f' convolution of
+   // the log-broadened curve b at m_l = 11 equally spaced points on [-gamma Lambda^2, gamma Lambda^2] (n_l = 2), a
+   // quadratic fit and eps_rms. The result is the smallest gamma at which eps_rms falls below the threshold, coming
+   // from larger values, interpolated linearly in (ln gamma, ln eps_rms) between the two grid points around the
+   // crossing; if the first point is already below, that point; if no point is, the minimum of eps_rms, with a
+   // warning. Rule (iv) of the paper (the geometric mean across an irregular window) is left to the user, who sees
+   // the scan in gamma_scan.dat and can set gamma with -x.
+   [[nodiscard]] double scan_gamma(const std::vector<double> &b) const {
+     constexpr size_t npoints = 41;
+     constexpr size_t ml = 11;
+     const auto mesh_min = std::abs(*std::min_element(mesh.begin(), mesh.end(), [](const double x, const double y) { return std::abs(x) < std::abs(y); }));
+     if (mesh_min > 0.01 * T)
+       throw std::runtime_error("-X: the output mesh must reach below 0.01*T (use -m).");
+     std::vector<double> ratios(npoints), eps(npoints);
+     for (size_t k = 0; k < npoints; k++) {
+       ratios[k] = 0.01 * std::pow(100.0, double(k) / double(npoints - 1));
+       const auto gamma = ratios[k] * T;
+       const auto omega_l = gamma * Lambda * Lambda;
+       std::array<double, ml> x{}, y{};
+       for (size_t i = 0; i < ml; i++) {
+         x[i] = omega_l * (double(i) / 5.0 - 1.0);
+         y[i] = convolve_at(b, x[i], gamma);
+       }
+       eps[k] = eps_rms(x, y);
+     }
+     {
+       std::ofstream F(scan_filename);
+       if (!F) throw std::runtime_error("Failed to open " + scan_filename + " for writing.");
+       F << std::setprecision(17) << "# gamma/T eps_rms\n";
+       for (size_t k = 0; k < npoints; k++) F << ratios[k] << " " << eps[k] << '\n';
+       NRG::Tools::finish_output(F, scan_filename);
+     }
+     if (eps[0] <= eps_threshold) return ratios[0];
+     for (size_t k = 1; k < npoints; k++) {
+       if (eps[k] <= eps_threshold) {
+         if (!(eps[k] > 0.0)) return ratios[k];
+         const auto l0 = std::log(ratios[k - 1]), l1 = std::log(ratios[k]);
+         const auto e0 = std::log(eps[k - 1]), e1 = std::log(eps[k]);
+         return std::exp(l0 + (std::log(eps_threshold) - e0) * (l1 - l0) / (e1 - e0));
+       }
+     }
+     const auto best = std::min_element(eps.begin(), eps.end()) - eps.begin();
+     std::cerr << "abroaden: warning: eps_rms never falls below " << eps_threshold << "; taking the minimum, "
+               << eps[best] << " at gamma/T=" << ratios[best] << ". See " << scan_filename << "." << std::endl;
+     return ratios[best];
+   }
+
  public:
    AdaptiveBroaden(int argc, char *argv[]) {
      std::cout << "abroaden - adaptive broadening tool" << std::endl;
@@ -198,6 +318,11 @@ class AdaptiveBroaden {
        std::cerr << "alpha=" << alpha << " T=" << T << " Lambda=" << Lambda << " gamma=" << gamma_ratio * T
                  << " sigma_min=" << sigma_min << " mesh points=" << mesh.size() << " jobs=" << jobs << std::endl;
      a = broaden_log();
+     if (auto_gamma) {
+       gamma_ratio = scan_gamma(a);
+       std::cout << std::setprecision(17) << "Automatic gamma/T=" << gamma_ratio << " (eps_rms threshold " << eps_threshold
+                 << ", scan in " << scan_filename << ")" << std::endl;
+     }
      convolve(mesh, a, gamma_ratio * T, jobs, derfd_kernel); // Eq. 16: after the log-Gaussian, over all frequencies
      std::cout << "Estimated weight (trapezoidal rule)=" << trapez(mesh, a) << std::endl;
      save(output_filename, mesh, a, verbose);

@@ -1,0 +1,16 @@
+#!/bin/sh
+# Automatic gamma (-X): gamma_scan.dat holds the 41 points of the scan, the chosen gamma/T lies in [0.01, 1], and
+# broadening with -x at the chosen value gives the same spectrum as -X.
+set -e
+tools=$1; src=$2; dir=$3
+perl "$dir/../make_input.pl" abin spec.abin spread
+"$tools/abroaden" -X -o spec.abin 1 0.3 1e-4 2 > auto.log
+mv spec.dat auto.dat
+ratio=$(perl -ne 'print $1 if /^Automatic gamma\/T=(\S+)/' auto.log)
+[ -n "$ratio" ] || { echo "no automatic gamma in the output"; exit 1; }
+echo "automatic gamma/T=$ratio"
+perl -e 'exit(($ARGV[0] >= 0.01 && $ARGV[0] <= 1.0) ? 0 : 1)' "$ratio" || { echo "gamma/T outside [0.01, 1]"; exit 1; }
+points=$(grep -vc '^#' gamma_scan.dat)
+[ "$points" -eq 41 ] || { echo "gamma_scan.dat has $points points"; exit 1; }
+"$tools/abroaden" -x "$ratio" -o spec.abin 1 0.3 1e-4 2 > manual.log
+perl "$dir/../compare_spec.pl" --tol=1e-14 --floor=1e-300 auto.dat spec.dat

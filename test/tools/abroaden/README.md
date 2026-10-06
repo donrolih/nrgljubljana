@@ -10,3 +10,4 @@ no references.
 | `abroaden2_zavg` | Two runs with weights 0.5 and 1.5 times a spectrum average to the spectrum (Eq. 15). |
 | `abroaden3_weight` | A spectrum of weight 1 with σ varying from peak to peak broadens to weight 1 within 1e-3. |
 | `abroaden4_errors` | Invalid arguments and a missing file fail. |
+| `abroaden5_gamma` | `-X`: 41 points in `gamma_scan.dat`, the chosen γ/T in [0.01, 1], and `-x` at the chosen value reproduces the spectrum. |
