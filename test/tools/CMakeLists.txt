@@ -1,5 +1,6 @@
 add_subdirectory(adapt)
 add_subdirectory(binavg)
+add_subdirectory(abroaden)
 add_subdirectory(broaden)
 add_subdirectory(bw)
 add_subdirectory(diag)

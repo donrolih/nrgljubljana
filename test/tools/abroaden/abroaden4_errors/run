@@ -1,0 +1,16 @@
+#!/bin/sh
+# Invalid input must fail with a non-zero exit code.
+tools=$1; src=$2; dir=$3
+perl "$dir/../make_input.pl" abin spec.abin
+fail=0
+expect_failure() {
+  if "$@" > /dev/null 2>&1; then echo "unexpected success: $*"; fail=1; fi
+}
+expect_failure "$tools/abroaden" -o spec.abin 1 0.3 1e-4         # Lambda missing
+expect_failure "$tools/abroaden" -o spec.abin 1 0.3 1e-4 1.0     # Lambda <= 1
+expect_failure "$tools/abroaden" -o spec.abin 1 0.0 1e-4 2       # alpha <= 0
+expect_failure "$tools/abroaden" -o spec.abin 1 0.3 0 2          # T <= 0
+expect_failure "$tools/abroaden" -o spec.abin 2 0.3 1e-4 2       # -o with Nz != 1
+expect_failure "$tools/abroaden" -o missing.abin 1 0.3 1e-4 2    # no such file
+expect_failure "$tools/abroaden" -x 0 -o spec.abin 1 0.3 1e-4 2  # gamma <= 0
+exit $fail

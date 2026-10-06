@@ -1,0 +1,12 @@
+#!/bin/sh
+# z-averaging: two runs with weights 0.5 and 1.5 times the spectrum average to the spectrum itself (Eq. 15).
+set -e
+tools=$1; src=$2; dir=$3
+mkdir -p 1 2
+perl "$dir/../make_input.pl" abin 1/spec.abin spread 0.5
+perl "$dir/../make_input.pl" abin 2/spec.abin spread 1.5
+perl "$dir/../make_input.pl" abin spec.abin spread 1.0
+"$tools/abroaden" spec.abin 2 0.3 1e-4 2 > zavg.log
+mv spec.dat zavg.dat
+"$tools/abroaden" -o spec.abin 1 0.3 1e-4 2 > one.log
+perl "$dir/../compare_spec.pl" --tol=1e-12 --floor=1e-14 spec.dat zavg.dat

@@ -1,0 +1,12 @@
+#!/bin/sh
+# With sigma = ln(Lambda) for every weight, adaptive broadening is the conventional log-Gaussian of width alpha:
+# abroaden must reproduce broaden with the same alpha, no omega0 crossover (omega0 = 1e-9 T by default, below the
+# mesh) and the same final -f' convolution (-x).
+set -e
+tools=$1; src=$2; dir=$3
+perl "$dir/../make_input.pl" abin spec.abin
+perl "$dir/../make_input.pl" bin spec.bin
+"$tools/broaden" -x 0.1 -o spec.bin 1 0.3 1e-4 > broaden.log
+mv spec.dat broaden.dat
+"$tools/abroaden" -x 0.1 -o spec.abin 1 0.3 1e-4 2 > abroaden.log
+perl "$dir/../compare_spec.pl" --tol=1e-10 --floor=1e-14 broaden.dat spec.dat

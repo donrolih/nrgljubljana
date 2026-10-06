@@ -1,0 +1,14 @@
+#!/bin/sh
+# Normalization: the input has total weight 1, so the broadened spectrum integrates to 1. The log-Gaussian
+# (Eq. 17a) and the -f' kernel both conserve weight; the trapezoidal estimate on the mesh must agree to 1e-3.
+set -e
+tools=$1; src=$2; dir=$3
+perl "$dir/../make_input.pl" abin spec.abin spread
+"$tools/abroaden" -M 10 -o spec.abin 1 0.3 1e-4 2 > abroaden.log
+perl -e '
+  my $weight;
+  while (<>) { $weight = $1 if /^Estimated weight \(trapezoidal rule\)=(\S+)/; }
+  die "no weight in the output\n" unless defined $weight;
+  print "weight $weight\n";
+  exit(abs($weight - 1) < 1e-3 ? 0 : 1);
+' abroaden.log
