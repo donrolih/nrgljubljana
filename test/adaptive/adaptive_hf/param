@@ -24,3 +24,5 @@ data_has_rescaled_energies=false
 
 adaptive_broadening=true
 adaptive_broadening_dumpenergies=true
+emin=1e-12
+emax=10

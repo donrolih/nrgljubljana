@@ -406,6 +406,9 @@ class Params {
   // block of the data file.
   param<bool> adaptive_broadening{"adaptive_broadening", "Compute dE/dz for adaptive broadening; requires a D block in data", "false", all}; // N
   param<bool> adaptive_broadening_dumpenergies{"adaptive_broadening_dumpenergies", "Dump dE/dz of all states to file [dEdz.nrg]", "false", all}; // N
+  // The grid of the broadening width sigma of the 2D bins, as in the paper: linear, from sigma_step to sigma_max.
+  param<double> adaptive_broadening_sigma_step{"adaptive_broadening_sigma_step", "Bin width of the broadening sigma", "0.01", all}; // N
+  param<double> adaptive_broadening_sigma_max{"adaptive_broadening_sigma_max", "Last bin of the broadening sigma; non-positive selects 2 ln(Lambda)", "-1.0", all}; // N
 
   // Overrides for the binning interval limits
   param<double> emin{"emin", "Lower binning limit", "-1.0", all}; // N
@@ -753,6 +756,25 @@ class Params {
     if (discretization != "Y"s && discretization != "C"s && discretization != "Z"s)
       throw std::invalid_argument(fmt::format("Unsupported discretization scheme: {}", discretization.value()));
     if (chitp_ratio > 0.0) chitp = chitp_ratio / betabar;
+    validate_adaptive_broadening();
+  }
+
+  // Last bin of the broadening sigma for adaptive broadening: the parameter, or 2 ln(Lambda), the paper's choice at T=0.
+  [[nodiscard]] double adaptive_sigma_max() const {
+    return adaptive_broadening_sigma_max > 0.0 ? double(adaptive_broadening_sigma_max) : 2.0 * std::log(double(Lambda));
+  }
+
+  void validate_adaptive_broadening() const {
+    if (!adaptive_broadening) return;
+    // Every z must bin on the same grid, so that the z-average is taken cell by cell; the default limits depend on z.
+    if (!(emin > 0.0) || !(emax > emin) || !std::isfinite(emax.value()))
+      throw std::invalid_argument("adaptive_broadening requires explicit binning limits 0 < emin < emax.");
+    if (accumulation != 0.0)
+      throw std::invalid_argument("adaptive_broadening is not supported with accumulation.");
+    if (!std::isfinite(adaptive_broadening_sigma_step.value()) || adaptive_broadening_sigma_step <= 0.0)
+      throw std::invalid_argument("adaptive_broadening_sigma_step must be finite and positive.");
+    if (!std::isfinite(adaptive_sigma_max()) || adaptive_sigma_max() < adaptive_broadening_sigma_step)
+      throw std::invalid_argument("adaptive_broadening_sigma_max must be finite and at least adaptive_broadening_sigma_step.");
   }
 
   // This validation step must be called after the data file has been read and parsed

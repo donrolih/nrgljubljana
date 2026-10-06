@@ -290,6 +290,39 @@ TEST(params, validate_rejects_invalid_thresholds) {
   EXPECT_NO_THROW(P.validate());
 }
 
+TEST(params, validate_adaptive_broadening) {
+  Params P;
+  P.adaptive_broadening = true;
+  EXPECT_THROW(P.validate(), std::invalid_argument); // default emin/emax depend on z
+
+  P.emin = 1e-12;
+  P.emax = 10.0;
+  EXPECT_NO_THROW(P.validate());
+  EXPECT_DOUBLE_EQ(P.adaptive_sigma_max(), 2.0 * std::log(double(P.Lambda)));
+
+  P.emax = 1e-13; // emax < emin
+  EXPECT_THROW(P.validate(), std::invalid_argument);
+  P.emax = 10.0;
+
+  P.accumulation = 0.1;
+  EXPECT_THROW(P.validate(), std::invalid_argument);
+  P.accumulation = 0.0;
+
+  P.adaptive_broadening_sigma_step = 0.0;
+  EXPECT_THROW(P.validate(), std::invalid_argument);
+  P.adaptive_broadening_sigma_step = 0.5;
+  P.adaptive_broadening_sigma_max = 0.25; // below one step
+  EXPECT_THROW(P.validate(), std::invalid_argument);
+  P.adaptive_broadening_sigma_max = 5.0;
+  EXPECT_NO_THROW(P.validate());
+  EXPECT_DOUBLE_EQ(P.adaptive_sigma_max(), 5.0);
+
+  P.adaptive_broadening = false; // nothing is checked without the switch
+  P.emin = -1.0;
+  P.emax = -1.0;
+  EXPECT_NO_THROW(P.validate());
+}
+
 TEST(params, validate_rejects_partial_diagonalisation_for_floquet) {
   for (const auto &diag : {"dsyevr"s, "zheevr"s}) {
     SCOPED_TRACE(diag);

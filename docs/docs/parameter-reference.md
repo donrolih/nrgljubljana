@@ -563,6 +563,8 @@ above.
 | `broaden` | boolean | `true` | Save broadened real-frequency text spectra. |
 | `adaptive_broadening` | boolean | `false` | Prepare adaptive broadening (Lee and Weichselbaum 2016); requires a `D` block in `data`. |
 | `adaptive_broadening_dumpenergies` | boolean | `false` | With `adaptive_broadening`, write the energies (`E=`) and dE/dz (`dEdz=`) of all states to `dEdz.nrg` at full precision, in the layout of `energies.nrg`. dE/dz is in shell units, relative to the ground state; both are scaled by `dumpenergiesunscaled` like `energies.nrg`. |
+| `adaptive_broadening_sigma_step` | number | `0.01` | With `adaptive_broadening`, width of the bins of the broadening σ (the paper's spacing). |
+| `adaptive_broadening_sigma_max` | number | `-1.0` | With `adaptive_broadening`, last σ bin; larger σ go there. Non-positive selects `2 ln(Lambda)`, the paper's choice at T=0. |
 | `emin` | number | `-1.0` | Explicit lower binning limit; non-positive selects a chain-derived limit. |
 | `emax` | number | `-1.0` | Explicit upper binning limit; non-positive selects a chain-derived limit. |
 | `bins` | positive integer | `1000` | Spectral bins per energy decade; zero is rejected when binning is used. |
@@ -600,9 +602,14 @@ D -0.0025
 ```
 
 `nrg` forms the derivatives of the chain coefficients from the two blocks.
-The parameter is not yet compatible with `tri=cpp` or with `Z` (superconducting)
-and `X` (channel-mixing) blocks. A `D` block without the parameter is read and
-ignored.
+Each spectral weight is binned in frequency (the usual logarithmic grid,
+`bins` per decade; the paper uses 250 to 500) and in its broadening width σ,
+on a linear grid from `adaptive_broadening_sigma_step` to
+`adaptive_broadening_sigma_max`. The parameter requires explicit binning
+limits `0 < emin < emax`, so that runs at different `z` bin on the same grid,
+and is not compatible with `accumulation`, `tri=cpp`, `floquet`, `substeps`,
+or with `Z` (superconducting) and `X` (channel-mixing) blocks. A `D` block
+without the parameter is read and ignored.
 
 **Accumulation and linear mesh.** `accumulation` shifts the logarithmic
 binning mesh's accumulation point away from `omega=0`; combined with a

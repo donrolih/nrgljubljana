@@ -44,6 +44,8 @@ std::unique_ptr<Params> make_params(const bool adaptive) {
          << "Lambda=2.0\n"
          << "Nmax=4\n"
          << "silent=true\n"
+         << "emin=1e-12\n"
+         << "emax=10\n"
          << "adaptive_broadening=" << (adaptive ? "true" : "false") << "\n";
   }
   auto P = std::make_unique<Params>(filename, "param", std::make_unique<Workdir>(".", true), true, true);
