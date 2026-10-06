@@ -171,6 +171,7 @@ class Values {
    void crit_copy_corr() { c = corrected; }
    void crit_negate() { negate_inplace(c); }
    void crit_abs() { abs_inplace(c); }
+   [[nodiscard]] auto get_scale() const noexcept { return scale; } // energy scale of the shell (absolute = scale * rel)
    [[nodiscard]] auto has_abs() const noexcept { return std::isfinite(scale); }
    [[nodiscard]] auto has_zero() const noexcept { return std::isfinite(shift); }
    [[nodiscard]] auto has_abs_zero() const noexcept { return has_abs() && has_zero(); }

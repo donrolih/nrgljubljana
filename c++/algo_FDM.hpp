@@ -45,11 +45,14 @@ class Algo_FDMls : virtual public Algo<S> {
       const auto absGi   = diagIi.values.all_abs_G() | ranges::to_vector;
       const auto absGj   = diagIj.values.all_abs_G() | ranges::to_vector;
       const auto boltzGj = absGj | ranges::views::transform([T](const auto E) { return std::exp(-E / T); }) | ranges::to_vector;
-      const auto add_exp_weight = [this, &absGi, &absGj, &boltzGj, &op1, &op2, factor, weight_scale = (-sign) * wnf](const auto i, const auto j) {
-        cb->add(std::make_pair(absGj[j] - absGi[i], conj_me(op1(j, i)) * op2(j, i) * weight_scale * boltzGj[j]), factor);
+      const AdaptiveSigma<S> sigma(diagIi, diagIj, P);
+      const auto add_exp_weight = [this, &absGi, &absGj, &boltzGj, &op1, &op2, &sigma, factor, weight_scale = (-sign) * wnf](const auto i, const auto j) {
+        const auto energy = absGj[j] - absGi[i];
+        cb->add(std::make_pair(energy, conj_me(op1(j, i)) * op2(j, i) * weight_scale * boltzGj[j]), factor, sigma(i, j, energy));
       };
-      const auto add_rho_weight = [this, &absGi, &absGj, &op1, &rho_op2, factor, sign_ = sign](const auto i, const auto j) {
-        cb->add(std::make_pair(absGj[j] - absGi[i], conj_me(op1(j, i)) * rho_op2(j, i) * (-sign_)), factor);
+      const auto add_rho_weight = [this, &absGi, &absGj, &op1, &rho_op2, &sigma, factor, sign_ = sign](const auto i, const auto j) {
+        const auto energy = absGj[j] - absGi[i];
+        cb->add(std::make_pair(energy, conj_me(op1(j, i)) * rho_op2(j, i) * (-sign_)), factor, sigma(i, j, energy));
       };
       for (const auto j : diagIj.Drange())
         for (const auto i : diagIi.Drange())
@@ -94,11 +97,14 @@ class Algo_FDMgt : virtual public Algo<S> {
       const auto absGi   = diagIi.values.all_abs_G() | ranges::to_vector;
       const auto absGj   = diagIj.values.all_abs_G() | ranges::to_vector;
       const auto boltzGi = absGi | ranges::views::transform([T](const auto E) { return std::exp(-E / T); }) | ranges::to_vector;
-      const auto add_exp_weight = [this, &absGi, &absGj, &boltzGi, &op1, &op2, factor, wnf](const auto i, const auto j) {
-        cb->add(std::make_pair(absGj[j] - absGi[i], conj_me(op1(j, i)) * op2(j, i) * wnf * boltzGi[i]), factor);
+      const AdaptiveSigma<S> sigma(diagIi, diagIj, P);
+      const auto add_exp_weight = [this, &absGi, &absGj, &boltzGi, &op1, &op2, &sigma, factor, wnf](const auto i, const auto j) {
+        const auto energy = absGj[j] - absGi[i];
+        cb->add(std::make_pair(energy, conj_me(op1(j, i)) * op2(j, i) * wnf * boltzGi[i]), factor, sigma(i, j, energy));
       };
-      const auto add_rho_weight = [this, &absGi, &absGj, &op1, &op2_rho, factor](const auto i, const auto j) {
-        cb->add(std::make_pair(absGj[j] - absGi[i], conj_me(op1(j, i)) * op2_rho(j, i)), factor);
+      const auto add_rho_weight = [this, &absGi, &absGj, &op1, &op2_rho, &sigma, factor](const auto i, const auto j) {
+        const auto energy = absGj[j] - absGi[i];
+        cb->add(std::make_pair(energy, conj_me(op1(j, i)) * op2_rho(j, i)), factor, sigma(i, j, energy));
       };
       for (const auto j : diagIj.Drange())
         for (const auto i : diagIi.Drange())
@@ -147,18 +153,22 @@ class Algo_FDM : public Algo_FDMls<S>, public Algo_FDMgt<S> {
       const auto boltzGi = absGi | ranges::views::transform([T](const auto E) { return std::exp(-E / T); }) | ranges::to_vector;
       const auto boltzGj = absGj | ranges::views::transform([T](const auto E) { return std::exp(-E / T); }) | ranges::to_vector;
 
-      const auto add_exp_weight = [&gt_cb, &ls_cb, &absGi, &absGj, &boltzGi, &boltzGj, &op1, &op2, factor, wnf, sign_ = sign](const auto i, const auto j) {
+      const AdaptiveSigma<S> sigma(diagIp, diagI1, P);
+      const auto add_exp_weight = [&gt_cb, &ls_cb, &absGi, &absGj, &boltzGi, &boltzGj, &op1, &op2, &sigma, factor, wnf, sign_ = sign](const auto i, const auto j) {
         const auto energy = absGj[j] - absGi[i];
+        const auto s = sigma(i, j, energy);
         const auto op1ji = conj_me(op1(j, i));
         const auto op2ji = op2(j, i);
-        gt_cb.add(std::make_pair(energy, op1ji * op2ji * wnf * boltzGi[i]), factor);
-        ls_cb.add(std::make_pair(energy, op1ji * op2ji * (-sign_) * wnf * boltzGj[j]), factor);
+        gt_cb.add(std::make_pair(energy, op1ji * op2ji * wnf * boltzGi[i]), factor, s);
+        ls_cb.add(std::make_pair(energy, op1ji * op2ji * (-sign_) * wnf * boltzGj[j]), factor, s);
       };
-      const auto add_ls_rho_weight = [&ls_cb, &absGi, &absGj, &op1, &rho_op2, factor, sign_ = sign](const auto i, const auto j) {
-        ls_cb.add(std::make_pair(absGj[j] - absGi[i], conj_me(op1(j, i)) * rho_op2(j, i) * (-sign_)), factor);
+      const auto add_ls_rho_weight = [&ls_cb, &absGi, &absGj, &op1, &rho_op2, &sigma, factor, sign_ = sign](const auto i, const auto j) {
+        const auto energy = absGj[j] - absGi[i];
+        ls_cb.add(std::make_pair(energy, conj_me(op1(j, i)) * rho_op2(j, i) * (-sign_)), factor, sigma(i, j, energy));
       };
-      const auto add_gt_rho_weight = [&gt_cb, &absGi, &absGj, &op1, &op2_rho, factor](const auto i, const auto j) {
-        gt_cb.add(std::make_pair(absGj[j] - absGi[i], conj_me(op1(j, i)) * op2_rho(j, i)), factor);
+      const auto add_gt_rho_weight = [&gt_cb, &absGi, &absGj, &op1, &op2_rho, &sigma, factor](const auto i, const auto j) {
+        const auto energy = absGj[j] - absGi[i];
+        gt_cb.add(std::make_pair(energy, conj_me(op1(j, i)) * op2_rho(j, i)), factor, sigma(i, j, energy));
       };
 
       for (const auto j : diagI1.Drange())
@@ -169,7 +179,7 @@ class Algo_FDM : public Algo_FDMls<S>, public Algo_FDMgt<S> {
           const auto energy = absGj[j] - absGi[i];
           const auto op1ji = conj_me(op1(j, i));
           const auto op2ji = op2(j, i);
-          gt_cb.add(std::make_pair(energy, op1ji * op2ji * wnf * boltzGi[i]), factor);
+          gt_cb.add(std::make_pair(energy, op1ji * op2ji * wnf * boltzGi[i]), factor, sigma(i, j, energy));
           add_ls_rho_weight(i, j);
         }
       for (const auto j : diagI1.Drange())
@@ -178,7 +188,7 @@ class Algo_FDM : public Algo_FDMls<S>, public Algo_FDMgt<S> {
           const auto energy = absGj[j] - absGi[i];
           const auto op1ji = conj_me(op1(j, i));
           const auto op2ji = op2(j, i);
-          ls_cb.add(std::make_pair(energy, op1ji * op2ji * (-sign) * wnf * boltzGj[j]), factor);
+          ls_cb.add(std::make_pair(energy, op1ji * op2ji * (-sign) * wnf * boltzGj[j]), factor, sigma(i, j, energy));
         }
     }
     void end([[maybe_unused]] const Step &step) override {

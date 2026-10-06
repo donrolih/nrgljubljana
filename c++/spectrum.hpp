@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <optional>
 #include <ostream>
 #include <stdexcept>
 #include <string>
@@ -15,6 +16,7 @@
 #include "traits.hpp"
 #include "params.hpp"
 #include "bins.hpp"
+#include "adaptive-bins.hpp"
 #include "matsubara.hpp"
 #include "io.hpp" // {fmt}, color_print
 
@@ -27,8 +29,11 @@ class ChainBinning {
  private:
    const Params &P;
    Bins<S> spos, sneg;
+   std::optional<AdaptiveBinsPosNeg<S>> sigma_bins; // adaptive broadening: weights binned also in sigma
  public:
-   explicit ChainBinning(const Params &P_) : P(P_), spos(P_), sneg(P_) {}
+   explicit ChainBinning(const Params &P_) : P(P_), spos(P_), sneg(P_) {
+     if (P.adaptive_broadening) sigma_bins.emplace(P_);
+   }
    void add(const double energy, const t_weight weight) {
      if (energy >= 0.0)
        spos.add(energy, weight);
@@ -38,6 +43,12 @@ class ChainBinning {
    void add(const std::pair<double, t_weight> &p, const t_weight factor) {
       const auto & [energy, weight] = p;
       this->add(energy, factor * weight);
+   }
+   // With the broadening width sigma of the weight (adaptive broadening); the 1D bins are filled as without it.
+   void add(const std::pair<double, t_weight> &p, const t_weight factor, const double sigma) {
+      const auto & [energy, weight] = p;
+      this->add(energy, factor * weight);
+      if (sigma_bins) sigma_bins->add(energy, sigma, factor * weight);
    }
    auto total_weight() const { return spos.total_weight() + sneg.total_weight(); }
    template<scalar U> friend class SpectrumRealFreq;
@@ -72,7 +83,9 @@ class SpectrumRealFreq {
    const std::string name, algoname, filename; // e.g. "A_d-A_d", "FT", "spec_A_d-A_d_dens_FT.dat"
    const Params &P;
    Bins<S> fspos, fsneg; // Full spectral information, separately for positive and negative frequencies
+   std::optional<AdaptiveBinsPosNeg<S>> fsigma; // adaptive broadening: binned also in sigma, saved as .abin
    void mergeNN2half(Bins<S> &fullspec, const Bins<S> &cs, const Step &step);
+   [[nodiscard]] double NN2factor(const double energy, const Step &step) const;
    void weight_report(const double imag_tolerance = 1e-10);
    void trim() {
      fspos.trim();
@@ -82,20 +95,33 @@ class SpectrumRealFreq {
    void continuous();
  public:
    SpectrumRealFreq(const std::string &name_, const std::string &algoname_, const std::string &filename_, const Params &P_) :
-     name(name_), algoname(algoname_), filename(filename_), P(P_), fspos(P_), fsneg(P_) {}
+     name(name_), algoname(algoname_), filename(filename_), P(P_), fspos(P_), fsneg(P_) {
+     if (P.adaptive_broadening) fsigma.emplace(P_);
+   }
    void mergeCFS(const ChainBinning<S> &cs) {
      fspos.merge(cs.spos); // Collect delta peaks
      fsneg.merge(cs.sneg);
+     if (fsigma && cs.sigma_bins) fsigma->merge(*cs.sigma_bins);
    }
    void mergeNN2(const ChainBinning<S> &cs, const Step &step) {
      if (!step.N_for_merging()) return;
      mergeNN2half(fspos, cs.spos, step); // Spectrum merging using the N/N+n patching.
      mergeNN2half(fsneg, cs.sneg, step);
+     if (fsigma && cs.sigma_bins) {
+       const auto factor = [this, &step](const double energy) { return NN2factor(energy, step); };
+       fsigma->pos.merge_weighted(cs.sigma_bins->pos, factor);
+       fsigma->neg.merge_weighted(cs.sigma_bins->neg, factor);
+     }
    }
    void save() {
      color_print(P.pretty_out, fmt::emphasis::bold, "Spectrum: {} {} -> ", name, algoname); // savebins() & continuous() append the filenames
      trim();
      if (P.savebins) savebins();
+     if (fsigma) {
+       const auto fn = filename + ".abin";
+       std::cout << " " << fn;
+       fsigma->save(fn, P.reim);
+     }
      if (P.broaden) continuous();
      weight_report();
    }
@@ -123,6 +149,16 @@ inline double windowfunction(const double E, const double Emin, const double Ex,
 // Here we perform the actual merging of data using the N/N+2 scheme. Note that we use a windowfunction (see above)
 // to accomplish the smooth combining of data.
 // See R. Bulla, T. A. Costi, D. Vollhardt, Phys. Rev. B 64, 045103 (2001)
+// The factor with which mergeNN2half takes a bin at the given energy, for the 2D bins of adaptive broadening.
+template<scalar S>
+double SpectrumRealFreq<S>::NN2factor(const double energy, const Step &step) const {
+  const auto Emin = step.scale() * P.getEmin();
+  const auto Ex   = step.scale() * P.getEx();
+  const auto Emax = step.scale() * P.getEmax();
+  if (!(Emin < energy && energy < Emax)) return 0.0;
+  return (P.NN2avg ? 0.5 : 1.0) * windowfunction(energy, Emin, Ex, Emax, step, P);
+}
+
 template<scalar S>
 void SpectrumRealFreq<S>::mergeNN2half(Bins<S> &fullspec, const Bins<S> &cs, const Step &step) {
   const auto Emin = step.scale() * P.getEmin(); // p

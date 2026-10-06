@@ -152,6 +152,36 @@ TEST(AdaptiveBins, save_abin) { // NOLINT
   std::remove(fn.c_str());
 }
 
+TEST(AdaptiveBins, merge_weighted) { // NOLINT
+  Params P;
+  setup(P);
+  AdaptiveBins<double> a(P), b(P);
+  b.add(0.5, 0.3, 2.0);
+  b.add(0.005, 0.3, 4.0);
+  a.merge_weighted(b, [](const double energy) { return energy > 0.1 ? 0.5 : 0.0; });
+  EXPECT_NEAR(std::abs(a.total_weight() - std::complex<double>(1.0, 0.0)), 0.0, 1e-14); // only the cells near 0.5, halved
+}
+
+TEST(AdaptiveSigma, formula) { // NOLINT
+  Params P;
+  P.Lambda = 2.0;
+  NRG::Eigen<double> ei(std::vector<double>{0.0, 1.0}, 1.0), ej(std::vector<double>{0.5, 2.0}, 1.0);
+  {
+    const AdaptiveSigma<double> sigma(ei, ej, P); // no dE/dz: the conventional width
+    EXPECT_DOUBLE_EQ(sigma(0, 1, 0.3), std::log(2.0));
+  }
+  ei.values.set_scale(0.25);
+  ej.values.set_scale(0.25);
+  ei.values.set_dEdz({0.0, -0.7});
+  ej.values.set_dEdz({-0.35, -1.4});
+  const AdaptiveSigma<double> sigma(ei, ej, P);
+  // omega = scale (e_j - e_i) = 0.25 * (2.0 - 1.0); sigma = scale |dEdz_j - dEdz_i| / |omega| = |-1.4 + 0.7| / 1.0
+  EXPECT_DOUBLE_EQ(sigma(1, 1, 0.25), 0.7);
+  EXPECT_DOUBLE_EQ(sigma(1, 1, -0.25), 0.7);                                   // |omega|
+  EXPECT_DOUBLE_EQ(sigma(0, 0, 0.125), 0.25 * 0.35 / 0.125);
+  EXPECT_EQ(sigma(0, 0, 0.0), std::numeric_limits<double>::infinity());       // omega = 0: the last sigma bin
+}
+
 TEST(AdaptiveBins, rejects_default_limits) { // NOLINT
   Params P; // emin, emax default to -1
   EXPECT_THROW(AdaptiveBins<double>{P}, std::invalid_argument);

@@ -41,9 +41,12 @@ class Algo_CFSls : virtual public Algo<S> {
          const auto weight = conj_me(op1(r1, rp)) * op2(r1, rp) * myexp(-E1/T) * (-sign)/Z;
          return std::make_pair(E1-Ep, weight);
        };
+       const AdaptiveSigma<S> sigma(diagIp, diagI1, P);
        for (const auto r1: diagI1.kept())
-         for (const auto rp: diagIp.kept())
-           cb->add(term1(r1, rp), factor);
+         for (const auto rp: diagIp.kept()) {
+           const auto t = term1(r1, rp);
+           cb->add(t, factor, sigma(rp, r1, t.first));
+         }
      } else {
        // iii-term, Eq. (16), positive frequency excitations
        const auto op2_rho = prod_fit_left(op2, rho.at(Ip));
@@ -53,9 +56,12 @@ class Algo_CFSls : virtual public Algo<S> {
          const auto weight = conj_me(op1(rl, rk)) * op2_rho(rl, rk) * (-sign);
          return std::make_pair(El-Ek, weight);
        };
+       const AdaptiveSigma<S> sigma(diagIp, diagI1, P);
        for (const auto rl: diagI1.discarded())
-         for (const auto rk: diagIp.kept())
-           cb->add(term3(rl, rk), factor);
+         for (const auto rk: diagIp.kept()) {
+           const auto t = term3(rl, rk);
+           cb->add(t, factor, sigma(rk, rl, t.first));
+         }
      }
    }
     void end([[maybe_unused]] const Step &step) override {
@@ -93,9 +99,12 @@ class Algo_CFSgt : virtual public Algo<S> {
          const auto weight = conj_me(op1(r1, rp)) * op2(r1, rp) * myexp(-Ep/T)/Z;
          return std::make_pair(E1-Ep, weight);
        };
+       const AdaptiveSigma<S> sigma(diagIp, diagI1, P);
        for (const auto r1: diagI1.kept())
-         for (const auto rp: diagIp.kept())
-           cb->add(term1(r1, rp), factor);
+         for (const auto rp: diagIp.kept()) {
+           const auto t = term1(r1, rp);
+           cb->add(t, factor, sigma(rp, r1, t.first));
+         }
      } else {
        // ii-term, Eq. (15), negative frequency excitations
        const auto op1_rho = prod_adj_fit_left(op1, rho.at(I1));
@@ -105,9 +114,12 @@ class Algo_CFSgt : virtual public Algo<S> {
          const auto weight = op1_rho(rl, rk) * op2(rk, rl);
          return std::make_pair(Ek-El, weight);
        };
+       const AdaptiveSigma<S> sigma(diagIp, diagI1, P);
        for (const auto rk: diagI1.kept())
-         for (const auto rl: diagIp.discarded())
-           cb->add(term2(rk, rl), factor);
+         for (const auto rl: diagIp.discarded()) {
+           const auto t = term2(rk, rl);
+           cb->add(t, factor, sigma(rl, rk, t.first));
+         }
      }
    }
     void end([[maybe_unused]] const Step &step) override {

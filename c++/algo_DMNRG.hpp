@@ -57,13 +57,14 @@ class Algo_DMNRG : public Algo<S> {
       Matrix sumB(nrI1Kept, nrIpKept);
       gemm_nn<S>(S(1), rhoNI1_kept, op1_conj, S(0), sumB);
 
+      const AdaptiveSigma<S> sigma(diagIp, diagI1, P);
       for (const auto rj: diagI1.kept())
         for (const auto rm: diagIp.kept()) {
           const auto energy = diagI1.values.abs_zero(rj) - diagIp.values.abs_zero(rm);
           if (std::abs(energy) < Emin || std::abs(energy) > Emax) continue;
           const auto weightA = sumA(rj, rm) * conj_me(op1_kept(rj, rm));
           const auto weightB = sumB(rj, rm) * op2_kept(rj, rm);
-          cb->add(std::make_pair(energy, weightA + (-sign) * weightB), factor);
+          cb->add(std::make_pair(energy, weightA + (-sign) * weightB), factor, sigma(rm, rj, energy));
         }
     }
     void end([[maybe_unused]] const Step &step) override {

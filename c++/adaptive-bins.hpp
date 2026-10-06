@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -20,6 +21,7 @@
 
 #include "traits.hpp"
 #include "params.hpp"
+#include "eigen.hpp"
 #include "basicio.hpp"  // safe_open
 #include "numerics.hpp" // reim
 
@@ -115,6 +117,15 @@ class AdaptiveBins {
      for (const auto &[key, w] : b.cells_) cells_[key] += w;
    }
 
+   // Merge with the weight of each cell multiplied by factor(energy of the cell), as SpectrumRealFreq::mergeNN2half
+   // does for Bins.
+   template<typename F>
+   void merge_weighted(const AdaptiveBins<S> &b, F &&factor) {
+     my_assert(nomega == b.nomega && nsigma == b.nsigma && log10emin == b.log10emin && sigma_step == b.sigma_step);
+     for (const auto &[key, w] : b.cells_)
+       if (const double f = factor(omega(key / nsigma)); f != 0.0) cells_[key] += f * w;
+   }
+
    void clear() { cells_.clear(); }
 
    // The stored cells, sorted by frequency and then by sigma.
@@ -132,6 +143,33 @@ class AdaptiveBins {
      t_weight sum{};
      for (const auto &[key, w] : cells_) sum += w;
      return sum;
+   }
+};
+
+// The broadening width of a spectral weight between state i of the first eigenspectrum and state j of the second
+// (Eq. 19): sigma_ij = |dE_j/dz - dE_i/dz| / |e_j - e_i|. dE/dz is in units of the shell and omega = E_j - E_i in
+// absolute units, so sigma = scale |dEdz_j - dEdz_i| / |omega|. A weight at omega = 0 has no defined sigma and gets
+// infinity, i.e. the last sigma bin. Without dE/dz (the seed from the data file with calc0) the conventional width
+// ln(Lambda) is used.
+template<scalar S, typename t_eigen = eigen_traits<S>>
+class AdaptiveSigma {
+ private:
+   const std::vector<t_eigen> *dEdz_i = nullptr;
+   const std::vector<t_eigen> *dEdz_j = nullptr;
+   double scale = 1.0;
+   double conventional = 0.0;
+ public:
+   AdaptiveSigma(const Eigen<S> &diagIi, const Eigen<S> &diagIj, const Params &P) : conventional(std::log(double(P.Lambda))) {
+     if (diagIi.values.has_dEdz() && diagIj.values.has_dEdz()) {
+       dEdz_i = &diagIi.values.all_dEdz();
+       dEdz_j = &diagIj.values.all_dEdz();
+       scale = diagIi.values.get_scale();
+     }
+   }
+   [[nodiscard]] double operator()(const std::size_t i, const std::size_t j, const double omega) const {
+     if (!dEdz_i) return conventional;
+     if (omega == 0.0) return std::numeric_limits<double>::infinity();
+     return scale * std::abs((*dEdz_j)[j] - (*dEdz_i)[i]) / std::abs(omega);
    }
 };
 
