@@ -1,0 +1,26 @@
+# The single-channel SIAM through the SIAM/QS template (copied from test/mixchain+nrgrun), with no truncation, so
+# that dE/dz from adaptive_broadening must agree with finite differences of the energies in z. The run script fills
+# in z.
+#
+# Read by the template's instantiate (Nmax, polarized), by matrix (the [extra] section, as param.extra) and by nrg
+# (the [param] section).
+
+[extra]
+U1=0.1
+eps1=-0.05
+
+[param]
+symtype=QS
+Lambda=2.0
+z=@Z@
+Nmax=5
+polarized=false
+
+keep=1000000
+keepenergy=-1
+T=1e-4
+ops=n_d
+data_has_rescaled_energies=false
+
+adaptive_broadening=true
+adaptive_broadening_dumpenergies=true

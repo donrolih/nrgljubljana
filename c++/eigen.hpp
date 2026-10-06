@@ -786,6 +786,19 @@ void dump_all_energies(const DiagInfo<S> &diag, const double rescaled_by, std::o
   }
 }
 
+// Energies and dE/dz (adaptive broadening) at full precision, so that the file alone suffices for checks by finite
+// differences in z.
+template<scalar S>
+void dump_all_dEdz(const DiagInfo<S> &diag, const double rescaled_by, std::ostream &F)  {
+  const auto precision = F.precision(std::numeric_limits<double>::max_digits10);
+  for (const auto &[I, eig]: diag) {
+    F << "Subspace: " << I << std::endl;
+    F << "E= " << rescaled(eig.values.all_rel(), rescaled_by) << std::endl;
+    F << "dEdz= " << rescaled(eig.values.all_dEdz(), rescaled_by) << std::endl;
+  }
+  F.precision(precision);
+}
+
 template<scalar S>
 void dump_all_states(const DiagInfo<S> &diag, const double rescaled_by, std::ostream &F, const Params &P)  {
   for (const auto &[I, eig]: diag) {

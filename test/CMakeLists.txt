@@ -71,6 +71,7 @@ add_subdirectory(tools)
 add_subdirectory(scripts)
 add_subdirectory(nrgspawn)
 add_subdirectory(mixchain+nrgrun)
+add_subdirectory(adaptive)
 
 if(TEST_SCIENTIFIC)
   add_subdirectory(scientific)

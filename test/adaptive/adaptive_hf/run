@@ -1,0 +1,54 @@
+#!/bin/bash
+set -euo pipefail
+# $1 = PROJECT_SOURCE_DIR, $2 = PROJECT_BINARY_DIR, $3 = this directory
+#
+# Hellmann-Feynman check of adaptive_broadening: dE/dz, propagated through the NRG run as an operator, must equal the
+# derivative of the energies with respect to z, taken by central differences of three runs at z-dz, z and z+dz. All
+# states are kept, so that the NRG eigenstates are exact and the two agree up to the finite-difference errors. Each
+# run gets a D block with a neighbouring chain; only the one of the middle run enters the comparison.
+source_dir=$1
+build_dir=$2
+test_dir=$3
+export PATH="$build_dir/tools:$build_dir/c++:$PATH"
+template="$source_dir/test/mixchain+nrgrun/templates/QS"
+
+z=0.5
+dz=1e-4
+zm=$(perl -e "print $z - $dz")
+zp=$(perl -e "print $z + $dz")
+
+# The flat-band chain at each z, from nrgchain.
+chain() { # chain DIR Z
+  mkdir -p "$1"
+  sed "s/@Z@/$2/" "$test_dir/param-nrgchain" > "$1/param-nrgchain"
+  (cd "$1" && nrgchain param-nrgchain > nrgchain.log)
+}
+rm -rf chain_m chain_0 chain_p zm z0 zp
+chain chain_m "$zm"
+chain chain_0 "$z"
+chain chain_p "$zp"
+
+# A run at Z with its chain in CHAIN and a D block with the chain in DCHAIN, shifted by DZ.
+run() { # run DIR Z CHAIN DCHAIN DZ
+  local dir=$1 zz=$2 ch=$3 dch=$4 shift=$5
+  mkdir "$dir"
+  cp -r "$template/." "$dir/"
+  sed "s/@Z@/$zz/" "$test_dir/param" > "$dir/param"
+  cp "$ch/xi.dat" "$dir/xi1.dat"
+  cp "$ch/zeta.dat" "$dir/zeta1.dat"
+  cp chain_0/theta.dat "$dir/theta1.dat" # one hybridization for all runs: the initial cluster must not depend on z
+  (
+    cd "$dir"
+    ./instantiate > instantiate.log
+    nmax=$(grep -c . xi1.dat); nmax=$((nmax - 1))
+    { echo "D $shift"; echo "$nmax"; cat "../$dch/xi.dat"; echo "$nmax"; cat "../$dch/zeta.dat"; } >> data
+    if ! nrg > log 2>&1; then echo "$dir: abnormal termination"; tail -20 log; exit 1; fi
+    [ -f DONE ] || { echo "$dir: no DONE"; exit 1; }
+  )
+}
+run zm "$zm" chain_m chain_0 "$dz"
+run z0 "$z"  chain_0 chain_p "$dz"
+run zp "$zp" chain_p chain_0 "-$dz"
+
+echo "=== comparison"
+perl "$test_dir/../compare_hf.pl" --lambda=2.0 --dz="$dz" --tol=1e-3 --gap=1e-3 zm/dEdz.nrg z0/dEdz.nrg zp/dEdz.nrg

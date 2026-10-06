@@ -136,6 +136,7 @@ struct Output {
   const Params &P;
   Annotated annotated;
   std::ofstream Fenergies;  // all energies (different file for NRG and for DMNRG)
+  std::ofstream FdEdz;      // dE/dz of all states, adaptive broadening (NRG run only)
   std::ofstream Fstates;    // all states
   std::ofstream Freport;    // select state energies and diagonal matrix elements of singlet operators
   std::unique_ptr<ExpvOutput<S>> custom;
@@ -143,6 +144,7 @@ struct Output {
   std::unique_ptr<H5Easy::File> h5raw;
   Output(const RUNTYPE &runtype_, const Operators<S> &operators, Stats<S> &stats, const Params &P_,
          const std::string filename_energies= "energies.nrg"s,
+         const std::string filename_dEdz = "dEdz.nrg"s,
          const std::string filename_states = "states.nrg"s,
          const std::string filename_report = "report.nrg"s,
          const std::string filename_custom = "custom",
@@ -151,6 +153,7 @@ struct Output {
     {
       if (runtype == RUNTYPE::NRG) {
         if (P.dumpenergies) Fenergies = safe_open(filename_energies);
+        if (P.adaptive_broadening && P.adaptive_broadening_dumpenergies) FdEdz = safe_open(filename_dEdz);
         if (P.dumpstates) Fstates = safe_open(filename_states);
         if (P.reportdiagonal) Freport = safe_open(filename_report);
       }
@@ -172,6 +175,14 @@ struct Output {
     if (!Fenergies) return;
     Fenergies << std::endl << "===== Iteration number: " << N << std::endl;
     dump_all_energies(diag, rescaled_by, Fenergies, P);
+  }
+  // Dump energies and dE/dz (adaptive broadening), in the layout of energies.nrg.
+  void dump_dEdz(const int N, const DiagInfo<S> &diag, const double rescaled_by = 1.0) {
+    if (!FdEdz) return;
+    // The seed from the data file (calc0) has no dE/dz.
+    if (!std::ranges::any_of(diag, [](const auto &entry) { return entry.second.values.has_dEdz(); })) return;
+    FdEdz << std::endl << "===== Iteration number: " << N << std::endl;
+    dump_all_dEdz(diag, rescaled_by, FdEdz);
   }
   void dump_states(const int N, const DiagInfo<S> &diag, const double rescaled_by = 1.0) {
     if (!Fstates) return;

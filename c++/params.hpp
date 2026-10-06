@@ -405,6 +405,7 @@ class Params {
   // Adaptive broadening (Lee and Weichselbaum, PRB 94, 235127 (2016)). Requires the chain at a shifted z in the D
   // block of the data file.
   param<bool> adaptive_broadening{"adaptive_broadening", "Compute dE/dz for adaptive broadening; requires a D block in data", "false", all}; // N
+  param<bool> adaptive_broadening_dumpenergies{"adaptive_broadening_dumpenergies", "Dump dE/dz of all states to file [dEdz.nrg]", "false", all}; // N
 
   // Overrides for the binning interval limits
   param<double> emin{"emin", "Lower binning limit", "-1.0", all}; // N

@@ -562,6 +562,7 @@ above.
 | `savebins` | boolean | `false` | Save unbroadened native binary spectral bins. |
 | `broaden` | boolean | `true` | Save broadened real-frequency text spectra. |
 | `adaptive_broadening` | boolean | `false` | Prepare adaptive broadening (Lee and Weichselbaum 2016); requires a `D` block in `data`. |
+| `adaptive_broadening_dumpenergies` | boolean | `false` | With `adaptive_broadening`, write the energies (`E=`) and dE/dz (`dEdz=`) of all states to `dEdz.nrg` at full precision, in the layout of `energies.nrg`. dE/dz is in shell units, relative to the ground state; both are scaled by `dumpenergiesunscaled` like `energies.nrg`. |
 | `emin` | number | `-1.0` | Explicit lower binning limit; non-positive selects a chain-derived limit. |
 | `emax` | number | `-1.0` | Explicit upper binning limit; non-positive selects a chain-derived limit. |
 | `bins` | positive integer | `1000` | Spectral bins per energy decade; zero is rejected when binning is used. |
