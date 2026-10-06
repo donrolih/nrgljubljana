@@ -6,7 +6,9 @@
 #include <fstream>
 #include <ios>
 #include <istream>
+#include <cmath>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <string>
 #include <iostream>
@@ -22,6 +24,7 @@
 #include "operators.hpp"
 #include "floquet.hpp"
 #include "coef.hpp"
+#include "tridiag.hpp"
 #include "mk_sym.hpp"
 
 #include <fmt/format.h>
@@ -92,6 +95,47 @@ private:
     operators.opch = Opch<S>(fdata, diag, P);
   }
 
+  // D block: the header line holds the signed shift dz = z' - z, followed by the xi and zeta tables of the chain at
+  // z', with the layout and units of the z block.
+  void read_perturbed_chain(std::istream &fdata, const std::string &header, const Params &P) {
+    if (dz) throw std::invalid_argument("The data file contains more than one D block.");
+    double value{};
+    try {
+      value = from_string<double>(strip_whitespace(header));
+    } catch (const std::exception &) {
+      throw std::invalid_argument(fmt::format("D block: dz must be a finite nonzero number, got [{}].", header));
+    }
+    if (!std::isfinite(value) || value == 0.0)
+      throw std::invalid_argument(fmt::format("D block: dz must be a finite nonzero number, got [{}].", header));
+    dz = value;
+    coef_dz.xi.read(fdata, P.coefchannels);
+    coef_dz.zeta.read(fdata, P.coefchannels);
+  }
+
+  // The perturbed chain must have the shape of the chain itself, and only the xi/zeta chains have a perturbed
+  // counterpart so far.
+  void validate_perturbed_chain(const Params &P) const {
+    if (dz && !P.adaptive_broadening && !P.silent)
+      std::cout << "The data file contains a D block, which is unused without adaptive_broadening." << std::endl;
+    if (!P.adaptive_broadening) return;
+    if (!dz) throw std::invalid_argument("adaptive_broadening requires a D block (the chain at a shifted z) in the data file.");
+    if (std::string(P.tri) == "cpp")
+      throw std::invalid_argument("adaptive_broadening is not supported with tri=cpp.");
+    if (coef.delta.nr_tabs() || coef.kappa.nr_tabs())
+      throw std::invalid_argument("adaptive_broadening does not support superconducting chains (Z block) yet.");
+    if (coef.xiR.nr_tabs() || coef.zetaR.nr_tabs())
+      throw std::invalid_argument("adaptive_broadening does not support channel-mixing rungs (X block) yet.");
+    const auto check_shape = [](const auto &base, const auto &perturbed, const std::string &name) {
+      if (perturbed.nr_tabs() != base.nr_tabs())
+        throw std::invalid_argument(fmt::format("D block: {} has {} tables, the z block {}.", name, perturbed.nr_tabs(), base.nr_tabs()));
+      for (size_t ch = 0; ch < base.nr_tabs(); ch++)
+        if (perturbed.max(ch) != base.max(ch))
+          throw std::invalid_argument(fmt::format("D block: {} table {} ends at index {}, the z block at {}.", name, ch, perturbed.max(ch), base.max(ch)));
+    };
+    check_shape(coef.xi, coef_dz.xi, "xi");
+    check_shape(coef.zeta, coef_dz.zeta, "zeta");
+  }
+
   void read_blocks(std::istream &fdata, Params &P) {
     while (true) {
       const auto [ch, opname] = read_next_block(fdata);
@@ -120,6 +164,9 @@ private:
         coef.xiR.read(fdata, P.coefchannels);
         coef.zetaR.read(fdata, P.coefchannels);
         break;
+      case 'D': // Wilson chain at the shifted z' = z + dz, for adaptive broadening; the header line gives dz
+        read_perturbed_chain(fdata, opname, P);
+        break;
       case 'T':
         coef.ep.read(fdata, P.coefchannels);
         coef.em.read(fdata, P.coefchannels);
@@ -138,6 +185,7 @@ private:
   }
 
   void finalize_coefficients(Params &P, const DataHeader &header) {
+    validate_perturbed_chain(P);
     if (std::string(P.tri) == "cpp") Tridiag<S>(coef, header.Nmax, P);
     determine_Nmax_Nlen(coef, header.Nmax, P);
     P.validate_after_data_file();
@@ -157,11 +205,13 @@ public:
   DiagInfo<S> diag;
   Operators<S> operators;
   Coef<S> coef;
+  Coef<S> coef_dz;          // chain at z' = z + dz (D block), for adaptive broadening
+  std::optional<double> dz; // set only if the data file has a D block
   double GS_energy = 0.0;
-  InputData(Params &P, std::istream &fdata) : coef(P) {
+  InputData(Params &P, std::istream &fdata) : coef(P), coef_dz(P) {
     read(fdata, P);
   }
-  InputData(Params &P, const std::string &filename = "data") : coef(P) {
+  InputData(Params &P, const std::string &filename = "data") : coef(P), coef_dz(P) {
     std::ifstream fdata(filename);
     if (!fdata) throw std::runtime_error(fmt::format("Can't load initial data from {}.", filename));
     read(fdata, P);

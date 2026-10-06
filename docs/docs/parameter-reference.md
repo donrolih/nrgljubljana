@@ -561,6 +561,7 @@ above.
 | `reportdiagonallast` | boolean | `true` | Limit `report.nrg` to the final iteration. |
 | `savebins` | boolean | `false` | Save unbroadened native binary spectral bins. |
 | `broaden` | boolean | `true` | Save broadened real-frequency text spectra. |
+| `adaptive_broadening` | boolean | `false` | Prepare adaptive broadening (Lee and Weichselbaum 2016); requires a `D` block in `data`. |
 | `emin` | number | `-1.0` | Explicit lower binning limit; non-positive selects a chain-derived limit. |
 | `emax` | number | `-1.0` | Explicit upper binning limit; non-positive selects a chain-derived limit. |
 | `bins` | positive integer | `1000` | Spectral bins per energy decade; zero is rejected when binning is used. |
@@ -583,6 +584,24 @@ above.
 `dumpabs=true` and `dumpscaled=true` are mutually incompatible. Widths are
 minimum padding widths, not fixed field boundaries; parse output as
 whitespace-separated text.
+
+**Adaptive broadening.** `adaptive_broadening=true` prepares the adaptive
+broadening of Lee and Weichselbaum (PRB 94, 235127 (2016)), in which each
+spectral weight gets its own width from how its energy moves with the
+discretization shift `z`. It requires the Wilson chain at a shifted
+`z' = z + dz` in a `D` block of `data`, with the layout and units of the `z`
+block and the signed shift on its header line:
+
+```
+D -0.0025
+<xi tables of the chain at z', one per coefficient channel>
+<zeta tables of the chain at z', one per coefficient channel>
+```
+
+`nrg` forms the derivatives of the chain coefficients from the two blocks.
+The parameter is not yet compatible with `tri=cpp` or with `Z` (superconducting)
+and `X` (channel-mixing) blocks. A `D` block without the parameter is read and
+ignored.
 
 **Accumulation and linear mesh.** `accumulation` shifts the logarithmic
 binning mesh's accumulation point away from `omega=0`; combined with a
