@@ -1,0 +1,9 @@
+# nrgchain: the flat band in closed form, at the z filled in by the run script.
+
+[param]
+tridiag_method=rkpw
+band=flat
+Lambda=2.0
+z=@Z@
+Nmax=60
+mMAX=120

@@ -1,0 +1,44 @@
+#!/bin/bash
+set -euo pipefail
+# $1 = PROJECT_SOURCE_DIR, $2 = PROJECT_BINARY_DIR, $3 = this directory
+#
+# The broadening widths sigma of the spectral weights of the paper's SIAM (FDM, A_d): the D block holds the chain at
+# z + dz with dz = 0.01/n_z, n_z = 4, as in the paper. sigma_profile.pl prints the weight-averaged sigma/ln(Lambda) per
+# decade of |omega|; in the fixed-point range it is close to 1, near the band edge and the Hubbard peaks smaller.
+source_dir=$1
+build_dir=$2
+test_dir=$3
+export PATH="$build_dir/tools:$build_dir/c++:$PATH"
+template="$source_dir/test/mixchain+nrgrun/templates/QS"
+
+z=0.5
+dz=0.0025
+zp=$(perl -e "print $z + $dz")
+theta=$(perl -e 'print 2*0.5*3.141592653589793/21') # Gamma = U pi/21 = theta/2
+
+chain() { # chain DIR Z
+  mkdir -p "$1"
+  sed "s/@Z@/$2/" "$test_dir/param-nrgchain" > "$1/param-nrgchain"
+  (cd "$1" && nrgchain param-nrgchain > nrgchain.log)
+}
+rm -rf chain_0 chain_p run
+chain chain_0 "$z"
+chain chain_p "$zp"
+
+mkdir run
+cp -r "$template/." run/
+sed "s/@Z@/$z/" "$test_dir/param" > run/param
+cp chain_0/xi.dat run/xi1.dat
+cp chain_0/zeta.dat run/zeta1.dat
+echo "$theta" > run/theta1.dat
+(
+  cd run
+  ./instantiate > instantiate.log
+  nmax=$(grep -c . xi1.dat); nmax=$((nmax - 1))
+  { echo "D $dz"; echo "$nmax"; cat ../chain_p/xi.dat; echo "$nmax"; cat ../chain_p/zeta.dat; } >> data
+  if ! nrg > log 2>&1; then echo "abnormal termination"; tail -20 log; exit 1; fi
+  [ -f DONE ] || { echo "no DONE"; exit 1; }
+)
+
+echo "=== sigma profile"
+perl "$test_dir/../sigma_profile.pl" --lambda=2.0 --check run/spec_FDM_dens_A_d-A_d.abin

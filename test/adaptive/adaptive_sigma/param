@@ -1,0 +1,30 @@
+# The SIAM of Lee and Weichselbaum (PRB 94, 235127 (2016), Figs. 2(b) and 5): U = -2 eps_d = 21 Gamma/pi = 0.5, flat
+# band D = 1, Lambda = 2, T = 0+, through the SIAM/QS template (copied from test/mixchain+nrgrun). The hybridization is
+# set by theta1.dat in the run script (Gamma = theta/2 for the flat band). The run script fills in z.
+#
+# Read by the template's instantiate (Nmax, polarized), by matrix (the [extra] section, as param.extra) and by nrg
+# (the [param] section).
+
+[extra]
+U1=0.5
+eps1=-0.25
+
+[param]
+symtype=QS
+Lambda=2.0
+z=@Z@
+Nmax=60
+polarized=false
+
+keep=800
+keepenergy=8
+T=1e-9
+ops=A_d
+specd=A_d-A_d
+fdm=true
+data_has_rescaled_energies=false
+
+adaptive_broadening=true
+emin=1e-12
+emax=10
+bins=500
