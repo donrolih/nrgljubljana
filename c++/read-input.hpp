@@ -137,11 +137,11 @@ private:
     check_shape(coef.zeta, coef_dz.zeta, "zeta");
     if (P.floquet) throw std::invalid_argument("adaptive_broadening is not supported with floquet.");
     if (P.substeps) throw std::invalid_argument("adaptive_broadening is not supported with substeps.");
-    if (operators.ops.count("dHdz"))
-      throw std::invalid_argument("adaptive_broadening does not read dH/dz of the initial cluster (singlet dHdz) yet.");
-    // The coefficients inside the initial cluster (zeta_0..Ninit, xi_0..Ninit-1) enter the Hamiltonian from the data
-    // file, whose derivative is not available yet, so they must not depend on z. Differences at the round-off level
-    // of the chain are tolerated.
+    // With dH/dz of the initial cluster in the data file, the coefficients inside it are covered by that operator.
+    if (!operators.dHdz.empty()) return;
+    // Without it, the coefficients inside the initial cluster (zeta_0..Ninit, xi_0..Ninit-1), which enter the
+    // Hamiltonian from the data file, must not depend on z. Differences at the round-off level of the chain are
+    // tolerated.
     double scale = 0.0;
     for (size_t ch = 0; ch < coef.xi.nr_tabs(); ch++)
       for (size_t n = 0; n <= coef.xi.max(ch); n++) scale = std::max(scale, std::abs(coef.xi(n, ch)));
@@ -152,7 +152,8 @@ private:
         for (size_t n = 0; n <= std::min(last, base.max(ch)); n++)
           if (std::abs(perturbed(n, ch) - base(n, ch)) > tolerance)
             throw std::invalid_argument(fmt::format("adaptive_broadening: {}_{} (table {}) depends on z, but it is part of the "
-                                                    "initial cluster (Ninit={}), whose dH/dz is not supported yet.", name, n, ch, Ninit));
+                                                    "initial cluster (Ninit={}), and the data file has no dH/dz of the "
+                                                    "initial cluster (singlet operator dHdz).", name, n, ch, Ninit));
     };
     check_initial(coef.zeta, coef_dz.zeta, "zeta", Ninit);
     if (Ninit > 0) check_initial(coef.xi, coef_dz.xi, "xi", Ninit - 1);
@@ -212,7 +213,27 @@ private:
     dcoef.zeta.set_difference_quotient(coef.zeta, coef_dz.zeta, dz.value());
   }
 
+  // dH/dz of the initial cluster, for adaptive broadening: the singlet operator dHdz, in the units of the eigenvalues of
+  // the data file and rescaled with them. It is the seed of operators.dHdz, which gains the new-site terms at every
+  // step, so it is taken out of the ordinary singlet operators, which are only recalculated.
+  void take_initial_dHdz(const Params &P) {
+    const auto it = operators.ops.find("dHdz");
+    if (it == operators.ops.end()) return;
+    auto dHdz = std::move(it->second);
+    operators.ops.erase(it);
+    if (!P.adaptive_broadening) {
+      if (!P.silent) std::cout << "The data file contains dH/dz of the initial cluster, which is unused without adaptive_broadening." << std::endl;
+      return;
+    }
+    for (const auto &[II, block] : dHdz)
+      if (II.first != II.second) throw std::invalid_argument("dHdz in the data file has an off-diagonal block: it must be a singlet operator.");
+    if (!(P.data_has_rescaled_energies || P.absolute))
+      for (auto &[II, block] : dHdz) block /= P.SCALE(P.Ninit); // as the eigenvalues in DiagInfo
+    operators.dHdz = std::move(dHdz);
+  }
+
   void finalize_coefficients(Params &P, const DataHeader &header) {
+    take_initial_dHdz(P);
     validate_perturbed_chain(P);
     if (P.adaptive_broadening) form_chain_derivative();
     if (std::string(P.tri) == "cpp") Tridiag<S>(coef, header.Nmax, P);

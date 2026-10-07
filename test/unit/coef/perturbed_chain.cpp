@@ -6,6 +6,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <gtest/gtest.h>
 
 #include <params.hpp>
@@ -35,7 +36,23 @@ std::string d_block(const std::string &header = "D -0.0025", const size_t maxind
   return ss.str();
 }
 
-std::unique_ptr<Params> make_params(const bool adaptive) {
+// dH/dz of the initial cluster: the singlet operator dHdz with VALUE times the identity in each subspace of
+// data_qs.txt, (Q,2S) = (-2,1), (-1,2), (0,1), (0,3), (1,2), (2,1) with 1, 2, 3, 1, 2, 1 states.
+std::string dHdz_block(const double value = 0.5) {
+  std::ostringstream ss;
+  ss << "sdHdz\n6\n";
+  for (const auto &[q, ss2, dim] : {std::tuple{-2, 1, 1}, std::tuple{-1, 2, 2}, std::tuple{0, 1, 3}, std::tuple{0, 3, 1},
+                                    std::tuple{1, 2, 2}, std::tuple{2, 1, 1}}) {
+    ss << q << " " << ss2 << " " << q << " " << ss2 << "\n";
+    for (int i = 0; i < dim; i++) {
+      for (int j = 0; j < dim; j++) ss << (i == j ? value : 0.0) << " ";
+      ss << "\n";
+    }
+  }
+  return ss.str();
+}
+
+std::unique_ptr<Params> make_params(const bool adaptive, const std::string &extra = "") {
   const auto filename = "perturbed_chain.param";
   {
     std::ofstream file(filename);
@@ -46,7 +63,8 @@ std::unique_ptr<Params> make_params(const bool adaptive) {
          << "silent=true\n"
          << "emin=1e-12\n"
          << "emax=10\n"
-         << "adaptive_broadening=" << (adaptive ? "true" : "false") << "\n";
+         << "adaptive_broadening=" << (adaptive ? "true" : "false") << "\n"
+         << extra;
   }
   auto P = std::make_unique<Params>(filename, "param", std::make_unique<Workdir>(".", true), true, true);
   std::remove(filename);
@@ -59,8 +77,8 @@ struct Run {
   std::unique_ptr<InputData<double>> input;
 };
 
-Run read_data(const bool adaptive, const std::string &extra) {
-  Run run{make_params(adaptive), nullptr};
+Run read_data(const bool adaptive, const std::string &extra, const std::string &param_extra = "") {
+  Run run{make_params(adaptive, param_extra), nullptr};
   std::istringstream ss(base_data() + extra);
   run.input = std::make_unique<InputData<double>>(*run.P, ss);
   return run;
@@ -127,6 +145,35 @@ TEST(PerturbedChain, rejects_z_dependent_initial_cluster) { // NOLINT
   EXPECT_THROW(read_data(true, d_block("D -0.0025", 4, 0.01)), std::invalid_argument);
   EXPECT_NO_THROW(read_data(true, d_block("D -0.0025", 4, 1e-17)));  // round-off level is tolerated
   EXPECT_NO_THROW(read_data(false, d_block("D -0.0025", 4, 0.01))); // irrelevant with the switch off
+}
+
+TEST(PerturbedChain, initial_dHdz_seeds_the_operator) { // NOLINT
+  // With dH/dz of the initial cluster, the coefficients inside it may depend on z.
+  const auto run = read_data(true, d_block("D -0.0025", 4, 0.01) + dHdz_block());
+  const auto &operators = run.input->operators;
+  EXPECT_EQ(operators.ops.count("dHdz"), 0U); // not an ordinary singlet operator
+  ASSERT_EQ(operators.dHdz.size(), 6U);
+  const auto &block = operators.dHdz.at(Twoinvar(Invar(0, 1), Invar(0, 1)));
+  ASSERT_EQ(block.rows(), 3);
+  EXPECT_DOUBLE_EQ(block(1, 1), 0.5); // in the units of the eigenvalues, which data_qs.txt has rescaled
+  EXPECT_DOUBLE_EQ(block(0, 1), 0.0);
+}
+
+TEST(PerturbedChain, initial_dHdz_is_rescaled_with_the_eigenvalues) { // NOLINT
+  const auto run = read_data(true, d_block() + dHdz_block(), "data_has_rescaled_energies=false\n");
+  const auto &block = run.input->operators.dHdz.at(Twoinvar(Invar(-1, 2), Invar(-1, 2)));
+  EXPECT_DOUBLE_EQ(block(0, 0), 0.5 / run.P->SCALE(run.P->Ninit));
+}
+
+TEST(PerturbedChain, initial_dHdz_unused_with_switch_off) { // NOLINT
+  const auto run = read_data(false, d_block() + dHdz_block());
+  EXPECT_TRUE(run.input->operators.dHdz.empty());
+  EXPECT_EQ(run.input->operators.ops.count("dHdz"), 0U);
+}
+
+TEST(PerturbedChain, initial_dHdz_must_be_a_singlet) { // NOLINT
+  const std::string offdiagonal = "sdHdz\n1\n-2 1 -1 2\n0.1 0.2\n";
+  EXPECT_THROW(read_data(true, d_block() + offdiagonal), std::invalid_argument);
 }
 
 TEST(PerturbedChain, rejects_superconducting_chain) { // NOLINT

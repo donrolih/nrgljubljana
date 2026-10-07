@@ -602,6 +602,14 @@ D -0.0025
 ```
 
 `nrg` forms the derivatives of the chain coefficients from the two blocks.
+The coefficients inside the initial cluster (the impurity coupling and the
+first sites, up to `Ninit`) are not built by `nrg`, so their derivative comes
+from `data` as the singlet operator `dHdz`: dH/dz of the initial cluster in
+its eigenbasis, in the units of the eigenvalues of `data` and rescaled with
+them (`data_has_rescaled_energies`). Without `dHdz`, those coefficients must be
+the same in the `z` and `D` blocks, which holds for a particle-hole symmetric
+bath with a z-independent coupling; otherwise `nrg` stops. A `dHdz` operator
+without `adaptive_broadening` is read and ignored.
 `nrginit` writes the `D` block when `adaptive_broadening=true` and `tri=manual`:
 it reads the chain at the shifted `z` from the subdirectory `dz/`, with the
 same file names as the chain itself (`xi.dat`, `zeta.dat`, or `xi<ch>.dat`,

@@ -309,7 +309,8 @@ void recalculate_and_measure(const Step &step, Operators<S> &operators, Stats<S>
 }
 
 // Adaptive broadening: dH/dz of shell N, for all states, from dH/dz of shell N-1 in its kept basis and the new-site
-// terms, dH_N/dz = sqrt(Lambda) dH_{N-1}/dz + (new-site terms with dcoef). The value of the ground state is subtracted,
+// terms, dH_N/dz = sqrt(Lambda) dH_{N-1}/dz + (new-site terms with dcoef). At the first step dH_{N-1}/dz is dH/dz of
+// the initial cluster (dHdz in the data file), or zero without it. The value of the ground state is subtracted,
 // so that only differences remain, as for the energies. The diagonal goes into Values as dE/dz (Hellmann-Feynman);
 // the matrix replaces operators.dHdz and is cut to the kept states by trim_matrices. Must run after split_in_blocks
 // (it uses the U blocks of all states) and before recalc_irreducible (it uses opch of the previous shell).

@@ -219,6 +219,7 @@ public:
     select_diag_engine();
 
     auto diag = run_phase(RUNTYPE::NRG, operators_seed, coef_seed, diag_seed, P.adaptive_broadening ? &dcoef_seed : nullptr);
+    operators_seed.dHdz.clear(); // dH/dz of the initial cluster seeds the NRG sweep only; the DM sweep reads dE/dz
     if (P.dm) {
       P.initialize_unitary_checkpoint_fingerprint();
       if (P.need_rho()) prepare_rho(diag);
