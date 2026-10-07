@@ -250,7 +250,8 @@ template<typename S> void SignDiscretizer<S>::evaluate(const double z, BlockStar
   coverage.fixed_mesh_fallback = fixed_mesh_fallback_;
   for (unsigned int m = 0; m <= options_.mMAX; m++) {
     const auto x     = z + m + 1.0;
-    const auto upper = mesh_.eps(x);
+    // The top interval always ends at the band edge, eps(2); for z <= 1 that is eps(z+1) anyway.
+    const auto upper = mesh_.eps(m == 0 ? std::min(x, 2.0) : x);
     const auto lower = mesh_.eps(x + 1.0);
 
     // An interval that holds no node of the input follows the interpolant alone.
@@ -330,7 +331,7 @@ template<typename S> void SignDiscretizer<S>::evaluate(const double z, BlockStar
   }
 
   const auto lowest_mesh = mesh_.eps(z + options_.mMAX + 2.0);
-  star.theta_exact += interpolation_.integral(lowest_mesh, mesh_.eps(z + 1.0));
+  star.theta_exact += interpolation_.integral(lowest_mesh, mesh_.eps(std::min(z + 1.0, 2.0)));
   star.diagnostics.max_cquad_error = std::max(star.diagnostics.max_cquad_error, max_error_);
   (sign_ == Sign::POS ? star.diagnostics.crossings_pos : star.diagnostics.crossings_neg) = decomposition_.crossings;
   coverage.lowest_mesh     = lowest_mesh;
@@ -395,7 +396,7 @@ template<typename S> class StarDiscretizer {
   // For every interval, every frequency branch and every eigenvalue branch, one bath level at the representative
   // energy with coupling vector sqrt(w) u. The z of the options is not used here.
   Star<S> star(const double z) {
-    if (!(z > 0.0 && z <= 1.0)) throw std::invalid_argument("z must be in (0,1].");
+    if (!(z > 0.0 && z < 2.0)) throw std::invalid_argument("z must be in (0,2).");
     const auto dimension = static_cast<Eigen::Index>(channels_);
     Star<S> result;
     result.channels    = channels_;
@@ -459,7 +460,7 @@ template<typename S> class StarDiscretizer {
 
 // A single star, for the z of the options.
 template<typename S> auto build_star(const GammaInput<S> &input, const StarOptions &options) {
-  if (!(options.z > 0.0 && options.z <= 1.0)) throw std::invalid_argument("z must be in (0,1].");
+  if (!(options.z > 0.0 && options.z < 2.0)) throw std::invalid_argument("z must be in (0,2).");
   return StarDiscretizer<S>(input, options).star(options.z);
 }
 

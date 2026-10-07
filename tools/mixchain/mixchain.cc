@@ -388,6 +388,10 @@ template<typename S> void run_star(const Configuration &configuration, const std
   for (const auto &target : list) {
     const auto start = std::chrono::steady_clock::now();
     if (!target.directory.empty()) std::cout << "# --- z=" << *target.z << " in " << target.directory.string() << "/" << std::endl;
+    // Above 1 the top interval is wider than one step of Lambda; the stars average to Gamma only for z in (0,1].
+    if (*target.z > 1.0)
+      std::cerr << "mixchain: warning: z=" << *target.z << " is above 1, where the top interval is wider than one step "
+                << "of Lambda; z-averaging needs z in (0,1]." << std::endl;
     const auto star = discretizer.star(*target.z);
     report_star(star, std::cout);
     if (!target.directory.empty()) std::filesystem::create_directories(target.directory);

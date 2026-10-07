@@ -58,7 +58,7 @@ template<typename S> auto mesh_weight_table(const GammaBranch<S> &branch, const 
 }
 
 // The discretization mesh of one frequency branch: eps(x) gives the interval boundaries, the interval of index m
-// being [eps(z+m+2), eps(z+m+1)].
+// being [eps(z+m+2), eps(z+m+1)]. The top interval always ends at the band edge: for z > 1 it is [eps(z+2), eps(2)].
 //
 //   fixed:     eps(x) = Lambda^(2-x) for x>2, and 1 otherwise;
 //   adaptive:  eps(x) = W^{-1}(Lambda^(2-x)), with W the cumulative of the weight function normalized to its value at

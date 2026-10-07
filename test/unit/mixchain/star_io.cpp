@@ -220,6 +220,7 @@ TEST(MixChainStarIO, rejects_an_invalid_header) { // NOLINT
   for (const auto *header : {"# channels=0 mMAX=1 z=1 Lambda=2 complex=0\n",
                              "# channels=1 mMAX=0 z=1 Lambda=2 complex=0\n",
                              "# channels=1 mMAX=1 z=0 Lambda=2 complex=0\n",
+                             "# channels=1 mMAX=1 z=2 Lambda=2 complex=0\n",
                              "# channels=1 mMAX=1 z=1 Lambda=1 complex=0\n",
                              "# channels=1 mMAX=1 z=1 Lambda=2 bandrescale=0 complex=0\n",
                              // integer fields that are not integers, or out of range

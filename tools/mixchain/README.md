@@ -93,7 +93,7 @@ is the same.
 | `channels` | `1` | star | Dimension $N$ of $\Gamma$. |
 | `dos_prefix` | `Gamma` | star | Prefix of the input files. |
 | `Lambda` | `2` | star | Discretization parameter $\Lambda$. |
-| `z` | `1` | star | Twist parameter. |
+| `z` | `1` | star | Twist parameter, in $(0,2)$; see the mesh for $z>1$. |
 | `mMAX` | `2*Nmax` | star | Largest interval index; the star has `2*channels*(mMAX+1)` levels. |
 | `bandrescale` | `1` | star | Band rescaling. |
 | `adapt` | `false` | star | Adaptive mesh, see below. |
@@ -148,6 +148,12 @@ for $x>2$, and $\epsilon(x)=1$ otherwise. $W_{\rm mesh}$ is the cumulative of a 
 normalized to its value at $\omega=1$: $\lVert\Gamma(\omega)\rVert_F$ for `mesh_weight=frobenius`, or
 ${\rm tr}\,\Gamma(\omega)$ for `mesh_weight=trace`. Both forms are followed by the `hardgap` rescaling
 $\epsilon\to(1-b)\,\epsilon+b$, with $b$ = `boundary`.
+
+The top interval always ends at the band edge. For $z\le 1$ that is $\epsilon(z+1)=1$ anyway. For $1<z<2$ the top
+interval is $[\epsilon(z+2),\,1]$, wider than one step of $\Lambda$, and its level stays at the representative energy
+$E(z+1)$. The star is then continuous with a continuous first derivative in $z$ at $z=1$, which is what the perturbed
+chain of adaptive broadening needs for a step above 1. The stars average to $\Gamma$ only over $z\in(0,1]$, so the
+star stage warns for $z>1$.
 
 The adaptive mesh gives every interval the same share of the cumulative weight. Where the weight function vanishes
 identically below some frequency, as it does inside a gap, $W_{\rm mesh}$ is flat there and the mesh accumulates at

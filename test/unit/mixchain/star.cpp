@@ -6,6 +6,7 @@
 #include <limits>
 #include <utility>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include <mixchain/star.hpp>
@@ -99,6 +100,61 @@ TEST(MixChainStar, flat_band_reproduces_the_analytic_star) { // NOLINT
   EXPECT_NEAR(star.theta(0, 0), 2.0 * covered, 1e-13);
   EXPECT_NEAR(star.theta(0, 0), star.theta_exact(0, 0), 1e-13);
   EXPECT_LT(star.diagnostics[0].max_interval_deviation, 1e-13);
+}
+
+TEST(MixChainStar, above_z_1_the_top_interval_ends_at_the_band_edge) { // NOLINT
+  const double rho = 0.3;
+  const double z   = 1.25;
+  const auto input = make_input<double>([rho](const double) { return scalar<double>(rho); });
+  auto options     = base_options();
+  options.z        = z;
+  const auto star  = build_star(input, options);
+
+  for (const auto sign : {Sign::POS, Sign::NEG}) {
+    const auto levels = select(star, sign, 0);
+    ASSERT_EQ(levels.size(), mmax + 1);
+    for (unsigned int m = 0; m <= mmax; m++) {
+      // The top interval is [Lambda^(-z), 1], the others [Lambda^(-z-m), Lambda^(1-z-m)].
+      const auto upper    = m == 0 ? 1.0 : std::pow(lambda_value, 1.0 - z - m);
+      const auto lower    = std::pow(lambda_value, -z - m);
+      const auto weight   = rho * (upper - lower);
+      const auto coupling = levels[m].coupling(0);
+      EXPECT_NEAR(coupling * coupling, weight, 1e-13 * weight) << "m=" << m;
+      EXPECT_GT(std::abs(levels[m].energy), lower) << "m=" << m;
+      EXPECT_LT(std::abs(levels[m].energy), upper) << "m=" << m;
+    }
+  }
+
+  // No weight is lost at the band edge: the mesh covers [Lambda^(-z-mMAX), 1] on each branch.
+  const auto covered = rho * (1.0 - std::pow(lambda_value, -z - static_cast<double>(mmax)));
+  EXPECT_NEAR(star.theta(0, 0), 2.0 * covered, 1e-13);
+  EXPECT_NEAR(star.theta(0, 0), star.theta_exact(0, 0), 1e-13);
+}
+
+TEST(MixChainStar, is_smooth_in_z_across_1) { // NOLINT
+  // The one-sided slopes of every energy and coupling at z=1 agree to O(h): the star has a continuous first
+  // derivative there, which a forward step of the perturbed chain needs. Gamma is not flat, so that the
+  // representative energies are not given by the flat-band formula.
+  const auto input = make_input<double>([](const double omega) { return scalar<double>(0.5 + 0.25 * omega); });
+  StarDiscretizer<double> discretizer(input, base_options());
+  const double h    = 1e-4;
+  const auto below  = discretizer.star(1.0 - h);
+  const auto centre = discretizer.star(1.0);
+  const auto above  = discretizer.star(1.0 + h);
+  ASSERT_EQ(below.levels.size(), centre.levels.size());
+  ASSERT_EQ(above.levels.size(), centre.levels.size());
+
+  const auto check = [h](const double a, const double c, const double b, const std::string &what) {
+    const auto left  = (c - a) / h;
+    const auto right = (b - c) / h;
+    EXPECT_NEAR(left, right, 1e-3 * std::max(1.0, std::abs(left))) << what;
+  };
+  for (std::size_t k = 0; k < centre.levels.size(); k++) {
+    const auto label = "level " + std::to_string(k);
+    check(below.levels[k].energy, centre.levels[k].energy, above.levels[k].energy, label + " energy");
+    check(below.levels[k].coupling(0), centre.levels[k].coupling(0), above.levels[k].coupling(0),
+          label + " coupling");
+  }
 }
 
 TEST(MixChainStar, is_covariant_under_a_constant_rotation) { // NOLINT
@@ -407,7 +463,7 @@ TEST(MixChainStar, one_setup_serves_every_z) { // NOLINT
               fresh.diagnostics[0].coverage_pos.unresolved_intervals);
   }
   EXPECT_THROW(shared.star(0.0), std::invalid_argument);
-  EXPECT_THROW(shared.star(1.5), std::invalid_argument);
+  EXPECT_THROW(shared.star(2.0), std::invalid_argument);
 }
 
 TEST(MixChainStar, a_split_diagonal_gamma_is_exactly_the_scalar_problem_per_channel) { // NOLINT
@@ -564,7 +620,7 @@ TEST(MixChainStar, rejects_invalid_options) { // NOLINT
   options   = base_options();
   options.z = 0.0;
   EXPECT_THROW(build_star(input, options), std::invalid_argument);
-  options.z = 1.5;
+  options.z = 2.0;
   EXPECT_THROW(build_star(input, options), std::invalid_argument);
 
   options      = base_options();

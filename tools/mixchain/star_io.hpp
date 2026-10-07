@@ -68,7 +68,7 @@ namespace NRG::MixChain {
 // Columns of a data row:
 //
 //   m      the interval index, 0..mMAX. The interval is [eps(z+m+2), eps(z+m+1)] on that branch's mesh, so a larger
-//          m lies closer to the Fermi level
+//          m lies closer to the Fermi level; for z > 1 the top interval m=0 is [eps(z+2), eps(2)]
 //   sign   the frequency branch the level came from: '+' for omega>0 and '-' for omega<0
 //   a      the eigenvalue branch of Gamma the level came from, 0..channels-1. This is a label from the branch
 //          tracking, not a channel: a branch is an eigenvector direction of Gamma, which in general points across
@@ -188,7 +188,7 @@ inline void parse_header_line(const std::string &line, StarHeader &header, const
   if (header.channels < 1 || header.channels > max_channels)
     throw std::runtime_error(filename + ": channels must be between 1 and " + std::to_string(max_channels) + ".");
   if (!(header.Lambda > 1.0)) throw std::runtime_error(filename + ": Lambda must be greater than 1.");
-  if (!(header.z > 0.0 && header.z <= 1.0)) throw std::runtime_error(filename + ": z must be in (0,1].");
+  if (!(header.z > 0.0 && header.z < 2.0)) throw std::runtime_error(filename + ": z must be in (0,2).");
   if (!(std::isfinite(header.bandrescale) && header.bandrescale > 0.0))
     throw std::runtime_error(filename + ": bandrescale must be a positive finite number.");
 }
