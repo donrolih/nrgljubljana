@@ -1,0 +1,18 @@
+#!/bin/sh
+# Very wide kernels: a few cells with sigma = 8 ln(Lambda) at small |omega| (as weights below T at finite T) next to
+# the usual ones. abroaden groups the cells by kernel width, each group with its own cutoff window; broadening is
+# linear, so the result for all cells must equal the sum of the results for the narrow and the wide cells alone.
+set -e
+tools=$1; src=$2; dir=$3
+perl "$dir/../make_input.pl" abin narrow.abin
+perl -e 'binmode STDOUT; my $s = 8 * log(2); print pack("d3", $_, $s, 0.01) for (2e-6, -2e-6, 5e-7, -5e-7)' > wide.abin
+cat narrow.abin wide.abin > all.abin
+for f in narrow wide all; do
+  "$tools/abroaden" -o $f.abin 1 0.3 1e-4 2 > $f.log
+  mv spec.dat $f.dat
+done
+perl -e '
+  open(my $n, "<", "narrow.dat") or die; open(my $w, "<", "wide.dat") or die;
+  while (my $a = <$n>) { my $b = <$w>; my @a = split " ", $a; my @b = split " ", $b; print "$a[0] ", $a[1] + $b[1], "\n"; }
+' > sum.dat
+perl "$dir/../compare_spec.pl" --tol=1e-10 --floor=1e-14 sum.dat all.dat

@@ -16,12 +16,15 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <ctime>
 #include <iostream>
 #include <map>
 #include <optional>
 #include <ostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -64,11 +67,61 @@ class AdaptiveBroaden {
      double width;
      double weight;
    };
-   std::vector<Cell> positive, negative; // sorted by ln |omega|
-   double max_width = 0.0;
+   // The cells of one sign, grouped by kernel width: a group holds the widths in [2^k, 2^(k+1)), sorted by ln|omega|,
+   // and the window in ln|omega| beyond which its widest kernel is negligible. A few very wide kernels (large sigma, at
+   // |omega| below T) then do not widen the window of all the narrow ones.
+   struct Group {
+     double window;
+     std::vector<Cell> cells;
+   };
+   std::vector<Group> positive, negative;
    double total_weight = 0.0;
    std::vector<double> mesh;
    std::vector<double> a;
+   size_t nr_cells = 0;
+   std::chrono::steady_clock::time_point wall_start;
+   std::clock_t cpu_start;
+   std::vector<std::pair<std::string, double>> phases; // name, wall seconds
+
+   // Run fnc and record its wall time under name.
+   template <typename F> auto timed(const std::string &name, F &&fnc) {
+     const auto start = std::chrono::steady_clock::now();
+     if constexpr (std::is_void_v<decltype(fnc())>) {
+       fnc();
+       phases.emplace_back(name, std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
+     } else {
+       auto result = fnc();
+       phases.emplace_back(name, std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
+       return result;
+     }
+   }
+
+   // As broaden's report_timing, plus the phases and the numbers of cells and groups.
+   void report_timing() const {
+     const auto wall_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - wall_start).count();
+     const auto cpu_end = std::clock();
+     std::optional<double> cpu_seconds;
+     if (cpu_start != static_cast<std::clock_t>(-1) && cpu_end != static_cast<std::clock_t>(-1) && cpu_end >= cpu_start)
+       cpu_seconds = static_cast<double>(cpu_end - cpu_start) / static_cast<double>(CLOCKS_PER_SEC);
+     std::ostringstream report;
+     report << std::setprecision(6) << "Time elapsed: " << wall_seconds << " s\n";
+     if (verbose) {
+       const auto throughput = wall_seconds > 0.0 ? static_cast<double>(mesh.size()) / wall_seconds : 0.0;
+       const auto passes = 2 + static_cast<int>(auto_gamma); // log-Gaussian, -f', and the gamma scan
+       report << "Performance: wall=" << wall_seconds << "s";
+       if (cpu_seconds && wall_seconds > 0.0)
+         report << " cpu=" << *cpu_seconds << "s effective_parallelism=" << *cpu_seconds / wall_seconds << "x";
+       else
+         report << " cpu=n/a effective_parallelism=n/a";
+       report << " throughput=" << throughput << " points/s workers=" << std::min(jobs, mesh.size())
+              << " passes=" << passes << " cells=" << nr_cells << " groups=" << positive.size() + negative.size() << '\n';
+       report << "Phases:";
+       for (const auto &[name, seconds] : phases) report << " " << name << "=" << seconds << "s";
+       report << '\n';
+     }
+     std::cout << report.str();
+     NRG::Tools::finish_output(std::cout, "<stdout>");
+   }
 
    void usage(std::ostream &F = std::cout) const {
      F << "Usage: abroaden [options] <name> <Nz> <alpha> <T> <Lambda>\n"
@@ -161,36 +214,49 @@ class AdaptiveBroaden {
        }
      }
      const auto lnL = std::log(Lambda);
+     std::map<int, std::vector<Cell>> by_width_pos, by_width_neg; // key: floor(log2(width))
      for (const auto &[key, w] : cells) {
        const auto &[omega, sigma] = key;
        const auto weight = w / Nz;
        total_weight += weight;
        if (omega == 0.0 || weight == 0.0) continue;
        const auto width = alpha * std::max(sigma, sigma_min) / lnL;
-       if (!(width > 0.0)) throw std::runtime_error("A cell has a non-positive broadening width; use -S.");
-       max_width = std::max(max_width, width);
-       (omega > 0.0 ? positive : negative).push_back({std::log(std::abs(omega)), omega, width, weight});
+       if (!(width > 0.0) || !std::isfinite(width)) throw std::runtime_error("A cell has a non-positive broadening width; use -S.");
+       const auto k = static_cast<int>(std::floor(std::log2(width)));
+       (omega > 0.0 ? by_width_pos : by_width_neg)[k].push_back({std::log(std::abs(omega)), omega, width, weight});
      }
      const auto by_log = [](const Cell &x, const Cell &y) { return x.logabs < y.logabs; };
-     std::sort(positive.begin(), positive.end(), by_log);
-     std::sort(negative.begin(), negative.end(), by_log);
+     const auto make_groups = [&by_log](std::map<int, std::vector<Cell>> &by_width, std::vector<Group> &groups) {
+       for (auto &[k, group_cells] : by_width) {
+         std::sort(group_cells.begin(), group_cells.end(), by_log);
+         double b = 0.0;
+         for (const auto &c : group_cells) b = std::max(b, c.width);
+         groups.push_back({b * (7.0 + b / 4.0), std::move(group_cells)});
+       }
+     };
+     make_groups(by_width_pos, positive);
+     make_groups(by_width_neg, negative);
+     nr_cells = cells.size();
      std::cout << cells.size() << " cells, total weight=" << total_weight << std::endl;
+     if (verbose) std::cerr << positive.size() + negative.size() << " groups of cells by kernel width" << std::endl;
    }
 
    // Each cell broadened with its own log-Gaussian (Eq. 17a). Cells further than b (7 + b/4) in ln|omega| from the
-   // output point, b the largest width, contribute less than exp(-49) relative and are skipped.
+   // output point, b the widest kernel of their group, contribute less than exp(-49) relative and are skipped.
    std::vector<double> broaden_log() const {
      std::vector<double> result(mesh.size());
-     const auto window = max_width * (7.0 + max_width / 4.0);
      for_each_index(mesh.size(), jobs, [&](const size_t index) {
        const auto m = mesh[index];
-       const auto &cells = m > 0.0 ? positive : negative;
+       const auto &groups = m > 0.0 ? positive : negative;
        const auto logm = std::log(std::abs(m));
-       const auto lo = std::lower_bound(cells.begin(), cells.end(), logm - window,
-                                        [](const Cell &c, const double v) { return c.logabs < v; });
        double sum = 0.0;
-       for (auto it = lo; it != cells.end() && it->logabs <= logm + window; ++it)
-         sum += it->weight * NRG::Broadening::log_gaussian(m, it->omega, it->width);
+       for (const auto &group : groups) {
+         const auto &cells = group.cells;
+         const auto lo = std::lower_bound(cells.begin(), cells.end(), logm - group.window,
+                                          [](const Cell &c, const double v) { return c.logabs < v; });
+         for (auto it = lo; it != cells.end() && it->logabs <= logm + group.window; ++it)
+           sum += it->weight * NRG::Broadening::log_gaussian(m, it->omega, it->width);
+       }
        result[index] = sum;
      });
      return result;
@@ -305,27 +371,28 @@ class AdaptiveBroaden {
    }
 
  public:
-   AdaptiveBroaden(int argc, char *argv[]) {
+   AdaptiveBroaden(int argc, char *argv[]) : wall_start{std::chrono::steady_clock::now()}, cpu_start{std::clock()} {
      std::cout << "abroaden - adaptive broadening tool" << std::endl;
      cmd_line(argc, argv);
    }
    void calc() {
-     read_and_merge();
+     timed("read", [this] { read_and_merge(); });
      mesh = mesh_filename.empty() ? make_mesh(broaden_min, broaden_max, broaden_ratio, 0.0, true, true)
                                   : load_mesh(mesh_filename, verbose);
      if (mesh.empty()) throw std::runtime_error("Output mesh is empty.");
      if (verbose)
        std::cerr << "alpha=" << alpha << " T=" << T << " Lambda=" << Lambda << " gamma=" << gamma_ratio * T
                  << " sigma_min=" << sigma_min << " mesh points=" << mesh.size() << " jobs=" << jobs << std::endl;
-     a = broaden_log();
+     a = timed("log_gaussian", [this] { return broaden_log(); });
      if (auto_gamma) {
-       gamma_ratio = scan_gamma(a);
+       gamma_ratio = timed("gamma_scan", [this] { return scan_gamma(a); });
        std::cout << std::setprecision(17) << "Automatic gamma/T=" << gamma_ratio << " (eps_rms threshold " << eps_threshold
                  << ", scan in " << scan_filename << ")" << std::endl;
      }
-     convolve(mesh, a, gamma_ratio * T, jobs, derfd_kernel); // Eq. 16: after the log-Gaussian, over all frequencies
+     timed("derfd", [this] { convolve(mesh, a, gamma_ratio * T, jobs, derfd_kernel); }); // Eq. 16: after the log-Gaussian, over all frequencies
      std::cout << "Estimated weight (trapezoidal rule)=" << trapez(mesh, a) << std::endl;
      save(output_filename, mesh, a, verbose);
+     report_timing();
    }
 };
 

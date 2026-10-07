@@ -35,9 +35,9 @@ abroaden [options] <name> <Nz> <alpha> <T> <Lambda>
 | `-I` | records carry an imaginary part (`reim=true` in `nrg`); the real part is broadened |
 | `-m`, `-M`, `-r`, `-L` | the output frequency mesh, as in `broaden` |
 | `-j <n>` | worker count (default: `OMP_NUM_THREADS`, or 1) |
-| `-v`, `-V`, `-h` | verbose, version, help |
+| `-v`, `-V`, `-h` | verbose (configuration, and a performance report with the time of each phase and the numbers of cells and of kernel-width groups), version, help |
 
-The result is written to `spec.dat` (ω, A(ω)).
+The result is written to `spec.dat` (ω, A(ω)). The elapsed time is printed at the end, as by `broaden`.
 
 ## Automatic γ
 
