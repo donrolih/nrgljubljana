@@ -602,6 +602,12 @@ D -0.0025
 ```
 
 `nrg` forms the derivatives of the chain coefficients from the two blocks.
+`nrginit` writes the `D` block when `adaptive_broadening=true` and `tri=manual`:
+it reads the chain at the shifted `z` from the subdirectory `dz/`, with the
+same file names as the chain itself (`xi.dat`, `zeta.dat`, or `xi<ch>.dat`,
+`zeta<ch>.dat`), and the signed shift `dz = z' - z` from `dz/dz.dat`; the
+corrections that `nrginit` adds to the chain (`bandrescale`, `gap`, `shift0`,
+`globalB`, `globalh`) do not depend on `z` and are applied to both.
 Each spectral weight is binned in frequency (the usual logarithmic grid,
 `bins` per decade; the paper uses 250 to 500) and in its broadening width σ,
 on a linear grid from `adaptive_broadening_sigma_step` to

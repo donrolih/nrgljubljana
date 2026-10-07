@@ -1,0 +1,7 @@
+[param]
+tridiag_method=rkpw
+band=flat
+Lambda=2.0
+z=@Z@
+Nmax=8
+mMAX=16

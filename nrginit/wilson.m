@@ -60,6 +60,19 @@ as encoded in defaultchaintype[] *)
 (* matrix = enforce matrix interface *)
 defaultchaintype[_] := "legacy";
 WILSONCHAIN = paramdefault["wilsonchain", defaultchaintype[SYMTYPE]];
+
+(* Adaptive broadening (Lee and Weichselbaum, PRB 94, 235127 (2016)): nrg needs the Wilson chain also at a shifted z,
+in a D block of the data file. With tri=manual it is read from the subdirectory dz/ (the same file names as the chain
+itself) together with the signed shift dz = z' - z in dz/dz.dat. *)
+ADAPTIVE = paramdefaultbool["adaptive_broadening", False];
+If[ADAPTIVE && !option["GENERATE_TEMPLATE"],
+  If[TRI != "manual",
+    MyError["adaptive_broadening requires tri=manual: the chain at the shifted z is read from dz/."]];
+  If[WILSONCHAIN != "legacy",
+    MyError["adaptive_broadening requires the legacy form of the Wilson chain."]];
+  If[RUNGS || isSC[] || FLOQUET,
+    MyError["adaptive_broadening does not support rungs, superconducting chains or floquet yet."]];
+];
 If[RKPW && (POL2x2 || RUNGS || BAND == "nambu" || WILSONCHAIN != "legacy"),
   MyError["rkpw requires scalar chains; matrix, Nambu and rung chains are not supported."];
 ];
@@ -553,7 +566,41 @@ dothelanczosrkpw[] := Module[{a, poles, coefficients, symmetric, n},
 
 (* Added 12.9.2012 *)
 (* Removed discfaktor[n] on 21 Sep 2016 *)
+(* Read a table of coefficients 0..DISCNMAX from a file, with a check of its length. *)
+importcoefficients[fn_String] := Module[{l},
+  l = Flatten[ImportTable[fn]];
+  If[Length[l] < DISCNMAX + 1,
+    MyError[fn, " holds ", Length[l], " coefficients, ", DISCNMAX + 1, " are needed."]];
+  l
+];
+
+(* Adaptive broadening: the chain at the shifted z from dz/, with the file names of the chain itself, into xiP[] and
+dzetaP[] (dzeta, not zeta: the z-independent corrections are added in the D tables, see the table loop below). *)
+loadshiftedtables[] := Module[{imp1, imp2},
+  MyPrint["Loading the chain at the shifted z from dz/ (adaptive broadening)."];
+  ADAPTIVEDZ = Flatten[ImportTable["dz/dz.dat"]];
+  If[Length[ADAPTIVEDZ] < 1 || !NumericQ[ADAPTIVEDZ[[1]]] || ADAPTIVEDZ[[1]] == 0,
+    MyError["dz/dz.dat must hold the nonzero shift dz = z' - z."]];
+  ADAPTIVEDZ = ADAPTIVEDZ[[1]];
+  MyPrint["dz=", ADAPTIVEDZ];
+  If[COEFCHANNELS == 1,
+    imp1 = importcoefficients["dz/xi.dat"];
+    Table[xiP[_][n] = imp1[[n+1]], {n, 0, DISCNMAX}];
+    imp2 = importcoefficients["dz/zeta.dat"];
+    Table[dzetaP[_][n] = imp2[[n+1]], {n, 0, DISCNMAX}];
+  ];
+  If[COEFCHANNELS > 1,
+    Do[
+      imp1 = importcoefficients["dz/xi" <> ToString[nrch] <> ".dat"];
+      Table[xiP[nrch][n] = imp1[[n+1]], {n, 0, DISCNMAX}];
+      imp2 = importcoefficients["dz/zeta" <> ToString[nrch] <> ".dat"];
+      Table[dzetaP[nrch][n] = imp2[[n+1]], {n, 0, DISCNMAX}],
+      {nrch, COEFCHANNELS}];
+  ];
+];
+
 loaddiscretizationtables[] := Module[{imp1,imp2},
+  If[ADAPTIVE, loadshiftedtables[]];
   MyPrint["Loading discretization data from files."];
   If[COEFCHANNELS == 1,
     (* Load xi[a], dzeta[a]. *)
@@ -1164,6 +1211,16 @@ Module[{a, precxi, preczeta, raw, scaled},
         zetatable[a] = List /@ scaled[[All, 2]],
         xitable[a]   = Table[{N[bandrescale xi[a][i],   OUTPREC]}, {i, 0, DISCNMAX}];
         zetatable[a] = Table[{N[bandrescale zeta[a][i], OUTPREC]}, {i, 0, DISCNMAX}];
+      ];
+
+      (* Adaptive broadening: the chain at the shifted z, as the z block would hold it. The corrections in zeta (gap,
+      shift0, globalB, globalh) do not depend on z, so adding the difference of the raw tables reproduces them and
+      bandrescale exactly. *)
+      If[ADAPTIVE && !option["GENERATE_TEMPLATE"],
+        xiDtable[a]   = Table[{N[bandrescale (xi[a][i] + (xiP[a][i] - xi[a][i])), OUTPREC]}, {i, 0, DISCNMAX}];
+        zetaDtable[a] = Table[{N[bandrescale (zeta[a][i] + (dzetaP[a][i] - dzeta[a][i])), OUTPREC]}, {i, 0, DISCNMAX}];
+        showtable["xiDtable", a, xiDtable[a]];
+        showtable["zetaDtable", a, zetaDtable[a]];
       ];
 
       showtable["xitable", a, xitable[a]];

@@ -1,0 +1,27 @@
+# Hellmann-Feynman check of adaptive_broadening through nrginit (tri=manual): the spinless resonant level (SL, U=0),
+# chain and theta from nrgchain (band=flat) at the z filled in by the run script, the chain at the shifted z in dz/.
+# No truncation, so dE/dz must equal central differences of the energies of the runs at z and z +- dz.
+
+[param]
+symtype=SL
+model=SIAM
+U=0
+delta=-0.05
+Gamma=-999
+
+band=manual
+tri=manual
+discretization=Z
+Lambda=2.0
+z=@Z@
+Nmax=8
+
+keep=100000
+keepenergy=-1
+T=1e-4
+ops=n_d
+
+adaptive_broadening=true
+adaptive_broadening_dumpenergies=true
+emin=1e-12
+emax=10

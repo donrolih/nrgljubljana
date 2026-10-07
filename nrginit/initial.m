@@ -1947,6 +1947,20 @@ makedisctables[] := Module[{t, a},
    t
 ];
 
+(* Adaptive broadening: the chain at the shifted z, in the layout of the z block, with dz on the header line. *)
+makeDdisctables[] := Module[{t, a},
+   t = {{"D", ADAPTIVEDZ}};
+   For[a = 1, a <= COEFCHANNELS, a++,
+     AppendTo[t, {DISCNMAX}];
+     t = Join[t, xiDtable[a]];
+   ];
+   For[a = 1, a <= COEFCHANNELS, a++,
+     AppendTo[t, {DISCNMAX}];
+     t = Join[t, zetaDtable[a]];
+   ];
+   t
+];
+
 makeRdisctables[] := Module[{t, a},
    t = {{"X"}};
    For[a = 1, a <= COEFCHANNELS, a++,
@@ -2069,6 +2083,9 @@ maketable[]:=Module[{t},
       ];
       If[RUNGS,
         t = Join[t, makeRdisctables[]];
+      ];
+      If[ADAPTIVE,
+        t = Join[t, makeDdisctables[]];
       ];
     ];
     If[WILSONCHAIN == "matrix",
