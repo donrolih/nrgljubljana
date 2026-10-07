@@ -112,6 +112,7 @@ is the same.
 | `sensitivity_tolerance` | `1e-10` | chain | Relative change of the chain under a change of the star by one unit in the last place above which a site is reported as not determined by the star; see Sensitivity below. |
 | `adaptive_broadening` | `false` | both | Also discretize at $z'=z+\delta z$, into `dz/`; see Adaptive broadening below. |
 | `adaptive_broadening_dz` | `-0.01/N` with `--Nz N`, else `-0.01` | both | The signed shift $\delta z$. |
+| `adaptive_broadening_theta_tolerance` | `1e-8` | chain | Change of $\Theta$ between $z$ and $z'$ above which the chain stage warns. |
 
 `boundary` is a fraction of the rescaled band edge, as in `adapt`: a gap $\Delta$ in the units of the input with
 `bandrescale`$=D$ is `boundary`$=\Delta/D$. The `-v` report prints both values.
@@ -134,6 +135,21 @@ with `--Nz`. They are the files a plain run at $z'$ writes (`star.dat`, `chain.d
 The default $\delta z$ is backward, $-0.01/N$ (or $-0.01$ for a single $z$), which keeps $z'$ in $(0,1]$; the paper
 takes $+0.01/N$. A forward step from $z=1$ needs $z'>1$, which the mesh allows (see Mesh). The perturbed stars are not
 meant for $z$-averaging, so they carry no warning for $z>1$.
+
+`nrg` takes the derivative of the chain from the difference of the two, which means something only where the chain is
+a smooth function of $z$ between them. Both are built with the same options and so in the same gauge; the polar gauge
+is analytic in the hoppings as long as they have full rank. The chain stage compares the two after the perturbed one:
+
+- The ranks of $\Theta$ and of every hopping must agree, block by block; otherwise the run stops, since the rank of
+  the chain changes between $z$ and $z'$ and no derivative exists there.
+- It reports the largest relative change of a hopping, $\lVert T_n(z')-T_n(z)\rVert/(\lVert T_n\rVert\,|\delta z|)$,
+  and of an on-site block, measured on the scale of its site, with their sites. At the fixed point every coefficient
+  scales as $\Lambda^{-z}$, so a smooth chain gives about $\ln\Lambda$; above $10\ln\Lambda$ it warns of a jump.
+- It reports $\lVert\Theta(z')-\Theta(z)\rVert/\lVert\Theta\rVert$. $V$ enters the initial cluster of `nrg`, whose
+  derivative is not taken, so a change of $\Theta$ is neglected in $dH/dz$, as the paper takes the impurity to be
+  independent of $z$. For a scalar band, or blocks that are, the star reproduces the integral of $\Gamma$ and $\Theta$
+  changes only through the weight below the lowest interval; where the eigenvectors of $\Gamma$ turn it changes with
+  the interval deviation of the star. Above `adaptive_broadening_theta_tolerance` the stage warns.
 
 ## Star stage
 
@@ -417,6 +433,8 @@ is `boundary` times `bandrescale`, and `mesh_weight` is `inactive` without `adap
 | `# Theta has rank r of N: ...` | $\Gamma$ is rank deficient over the whole band. The chain along the decoupled combinations is zero, which is exact. |
 | `# matrix files written to d` | With `discretization_files`, the directory the per-element files went to. |
 | `# chain written to`, `# chain z=: t s`, `# chain stage: t s` | The file, the wall time of this $z$, and of the whole stage. |
+| `# dz=: \|\|Theta(z+dz)-Theta(z)\|\|/\|\|Theta(z)\|\|=` | With `adaptive_broadening`, after the perturbed chain: the change of $\Theta$; see Adaptive broadening. |
+| `# dz=: max \|\|T_n(z+dz)-T_n(z)\|\|/(\|\|T_n\|\| \|dz\|)= at site n, max \|\|E_n(z+dz)-E_n(z)\|\|/...= at site n, ln(Lambda)=` | The largest relative changes per unit $z$ of a hopping and of an on-site block, and $\ln\Lambda$, which they are about at the fixed point. |
 
 `chain.dat` records the same quantities, plus `min_rank`, the smallest rank of a hopping, `rank_drop_site`, the first
 site where it falls below `theta_rank`, and `continued_from_site`, the first site that samples the untabulated
@@ -431,6 +449,8 @@ add up site by site, and the ratios of eigenvalues are taken within each block.
 | --- | --- |
 | `mixchain: warning: the rank of the hopping drops below r at site n ..., in block {..}` | The levels with nonzero coupling of that block run out before the chain ends, and the chain is zero in the lost direction from site `n+1` on. The others lie where $\Gamma$ vanishes on the mesh (a gap that a fixed or shared mesh does not follow) or collapsed onto an accumulation point, so more `mMAX` does not help; a mesh that follows the block (`adapt=true`, `split_blocks=true`) or a smaller `Nmax` does. |
 | `mixchain: warning: z=... is above 1, ...` | A star for $z>1$, other than the perturbed one of `adaptive_broadening`. Its top interval is wider than one step of $\Lambda$, and the stars average to $\Gamma$ only over $z\in(0,1]$. |
+| `mixchain: warning: Theta changes by ... between z and z+dz, ...` | Above `adaptive_broadening_theta_tolerance`: the impurity coupling depends on $z$, which $dH/dz$ in `nrg` neglects. More intervals reduce it. |
+| `mixchain: warning: the hopping at site n changes by ... ln(Lambda) per unit z ...` | More than $10\ln\Lambda$ (also for an on-site block): a jump between $z$ and $z'$ rather than a derivative. |
 | `mixchain: warning: Integral method failed at x=...` | A CQUAD failure, reported instead of stopping with `--gsl-error-policy warn`. |
 | `mixchain: error: ...` | The run stops with a nonzero exit status; files of the stages completed before it remain. |
 

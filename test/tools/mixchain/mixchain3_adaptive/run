@@ -40,6 +40,12 @@ is_dz single/dz/dz.dat 0.0025
 grep -q "^# channels=1 mMAX=30 z=1.002" single/dz/star.dat
 plain single_plain single/dz
 same single/dz single_plain
+# The chain stage compares the two chains after the perturbed one; a scalar band keeps Theta and changes smoothly.
+grep -q "^# dz=0.0025.*||Theta(z+dz)-Theta(z)||/||Theta(z)||=" single/mixchain.log
+grep -q "^# dz=0.0025.*max ||T_n(z+dz)-T_n(z)||" single/mixchain.log
+if grep -q "warning: Theta changes\|warning: the hopping\|warning: the on-site" single/mixchain.log; then
+  echo "single: a warning about the perturbed chain"; exit 1
+fi
 # The perturbed star is not z-averaged, so it carries no warning for z above 1.
 if grep -q "warning: z=" single/mixchain.log; then echo "single: a warning for the perturbed star"; exit 1; fi
 

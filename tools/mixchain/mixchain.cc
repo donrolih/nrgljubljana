@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cmath>
 #include <complex>
+#include <cstddef>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
@@ -19,6 +20,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <common/version.hpp>
@@ -30,6 +32,7 @@
 #include "branches.hpp"
 #include "chain.hpp"
 #include "chain_io.hpp"
+#include "dz_chain.hpp"
 #include "load.hpp"
 #include "mesh.hpp"
 #include "parser.hpp"
@@ -170,6 +173,8 @@ struct Configuration {
   // adaptive_broadening: the star and chain also at z' = z + dz, into dz/ beside the files for z
   std::optional<double> adaptive_dz;
   bool adaptive_dz_default{};
+  // The change of Theta between z and z' above which the chain stage warns: nrg neglects it in dH/dz.
+  double adaptive_theta_tolerance{1e-8};
 };
 
 auto builds_star(const Mode mode) { return mode != Mode::Chain; }
@@ -245,6 +250,9 @@ void read_adaptive_configuration(const Params &P, const CommandLineOptions &comm
   if (!(std::isfinite(dz) && dz != 0.0))
     throw std::invalid_argument("adaptive_broadening_dz must be a nonzero finite number.");
   configuration.adaptive_dz = dz;
+  configuration.adaptive_theta_tolerance = P.P("adaptive_broadening_theta_tolerance", 1e-8);
+  if (!(std::isfinite(configuration.adaptive_theta_tolerance) && configuration.adaptive_theta_tolerance > 0.0))
+    throw std::invalid_argument("adaptive_broadening_theta_tolerance must be a positive finite number.");
 }
 
 Configuration read_configuration(const Params &P, const CommandLineOptions &command_line) {
@@ -291,6 +299,8 @@ void report_configuration(const Configuration &configuration, const CommandLineO
                       command_line.Nz ? "-0.01/Nz" : "-0.01 for a single z");
     else
       report.value("adaptive_broadening_dz", *configuration.adaptive_dz);
+    if (builds_chain(command_line.mode))
+      report.value("adaptive_broadening_theta_tolerance", configuration.adaptive_theta_tolerance);
   }
   report.write(std::cerr);
 }
@@ -547,7 +557,7 @@ void report_chain(const Chain<S> &chain, const ChainFileHeader &header, const do
 
 // The chain is built from star.dat also in the default mode, right after the star stage has written it, so that the
 // default mode and 's' followed by 'l' produce the same chain by construction.
-template<typename S0> void run_chain(const Configuration &configuration, const Params &P, const Target &target) {
+template<typename S0> Chain<S0> run_chain(const Configuration &configuration, const Params &P, const Target &target) {
   const auto start     = std::chrono::steady_clock::now();
   const auto star_file = target.file(star_default_filename);
   print_heading(target);
@@ -571,6 +581,46 @@ template<typename S0> void run_chain(const Configuration &configuration, const P
   }
   std::cout << "# chain written to " << chain_file << std::endl;
   std::cout << "# chain z=" << star.z << ": " << seconds_since(start) << " s" << std::endl;
+  return chain;
+}
+
+// The chain at z' against the chain at z: always reported, after the perturbed chain, and warned about where the
+// difference does not look like a derivative. A smooth chain changes by about ln(Lambda) per unit z at the fixed point;
+// ten times that is taken as a jump, such as a crossing of the gauge or a site the star does not determine.
+template<typename S0>
+void report_dz_chain(const Chain<S0> &main, const Chain<S0> &perturbed, const Configuration &configuration,
+                     const double Lambda) {
+  const auto dz         = *configuration.adaptive_dz;
+  const auto comparison = compare_dz_chain(main, perturbed, dz);
+  const auto log_lambda = std::log(Lambda);
+  std::cout << "# dz=" << dz << ": ||Theta(z+dz)-Theta(z)||/||Theta(z)||=" << comparison.theta_change << std::endl;
+  std::cout << "# dz=" << dz << ": max ||T_n(z+dz)-T_n(z)||/(||T_n|| |dz|)=" << comparison.max_hopping_rate
+            << " at site " << comparison.max_hopping_site << ", max ||E_n(z+dz)-E_n(z)||/(max(||E_n||,||T_n||) |dz|)="
+            << comparison.max_onsite_rate << " at site " << comparison.max_onsite_site << ", ln(Lambda)=" << log_lambda
+            << std::endl;
+  if (comparison.theta_change > configuration.adaptive_theta_tolerance)
+    std::cerr << "mixchain: warning: Theta changes by " << comparison.theta_change << " between z and z+dz, more than "
+              << "adaptive_broadening_theta_tolerance=" << configuration.adaptive_theta_tolerance << ": the impurity "
+              << "coupling depends on z, which dH/dz in nrg neglects. The star reproduces the integral of Gamma only "
+              << "approximately where its eigenvectors turn; more intervals (larger mMAX or smaller Lambda) reduce it."
+              << std::endl;
+  const auto jump = 10.0 * log_lambda;
+  for (const auto &[name, rate, site] : {std::tuple{"hopping", comparison.max_hopping_rate, comparison.max_hopping_site},
+                                         std::tuple{"on-site block", comparison.max_onsite_rate, comparison.max_onsite_site}})
+    if (rate > jump)
+      std::cerr << "mixchain: warning: the " << name << " at site " << site << " changes by " << rate / log_lambda
+                << " ln(Lambda) per unit z between z and z+dz, more than 10 ln(Lambda): that is a jump rather than a "
+                << "derivative, such as a crossing of the gauge or a site the star does not determine, and dH/dz "
+                << "from it is not reliable." << std::endl;
+}
+
+// A target and, with adaptive_broadening, its perturbed companion, which is compared with it.
+template<typename S0>
+void run_chains(const Configuration &configuration, const Params &P, const Target &target, const Target *companion) {
+  const auto main = run_chain<S0>(configuration, P, target);
+  if (!companion) return;
+  const auto perturbed = run_chain<S0>(configuration, P, *companion);
+  report_dz_chain(main, perturbed, configuration, read_star_header(target.file(star_default_filename)).Lambda);
 }
 
 // Wall-clock time of one stage, for comparing the cost of the two.
@@ -595,11 +645,18 @@ void run(const CommandLineOptions &command_line) {
     });
   if (builds_chain(command_line.mode))
     timed("chain", [&] {
-      for (const auto &target : targets(command_line, std::nullopt, configuration.adaptive_dz)) {
-        if (star_is_complex(target.file(star_default_filename)))
-          run_chain<std::complex<double>>(configuration, P, target);
+      const auto list = targets(command_line, std::nullopt, configuration.adaptive_dz);
+      for (std::size_t i = 0; i < list.size(); i++) {
+        const auto &target    = list[i];
+        const auto *companion = i + 1 < list.size() && list[i + 1].perturbed ? &list[++i] : nullptr;
+        const auto complex    = star_is_complex(target.file(star_default_filename));
+        if (companion && star_is_complex(companion->file(star_default_filename)) != complex)
+          throw std::runtime_error("The stars at z and z+dz in " + target.directory.string()
+                                   + " differ in being complex.");
+        if (complex)
+          run_chains<std::complex<double>>(configuration, P, target, companion);
         else
-          run_chain<double>(configuration, P, target);
+          run_chains<double>(configuration, P, target, companion);
       }
     });
 }
