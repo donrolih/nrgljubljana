@@ -1,0 +1,12 @@
+# mixchain: the rotated 2x2 hybridisation of mixchain_u1_rotated at the z filled in by the run script, with the
+# perturbed chain at z + dz in dz/ (adaptive_broadening).
+
+[param]
+Lambda=2.0
+z=@Z@
+Nmax=4
+mMAX=40
+channels=2
+discretization_files=true
+adaptive_broadening=true
+adaptive_broadening_dz=@DZ@

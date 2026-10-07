@@ -4,7 +4,7 @@ set -euo pipefail
 #
 # adaptive_hf (test/adaptive) with the chains from mixchain: three runs at z = 1 and 1 +- 1e-4. mixchain writes the
 # chain at z and, with adaptive_broadening, the chain at z + dz into dz/ with dz/dz.dat; both are staged for the
-# SIAM/QS template, and the run script appends the D block from dz/. The middle run takes a forward step to z = 1 +
+# SIAM/QS template, and append_D_block.pl appends the D block from dz/. The middle run takes a forward step to z = 1 +
 # 1e-4, so the check covers the discretization above z = 1, which must continue smoothly the one below it.
 source_dir=$1
 build_dir=$2
@@ -36,8 +36,7 @@ run() { # run DIR Z SHIFT
     # through the weight below the lowest interval, here 2^-40.
     [ "$dir" = z0 ] || cp ../z0/theta1.dat .
     ./instantiate > instantiate.log
-    nmax=$(grep -c . xi1.dat); nmax=$((nmax - 1))
-    { echo "D $(cat dz/dz.dat)"; echo "$nmax"; cat dz/xi1.dat; echo "$nmax"; cat dz/zeta1.dat; } >> data
+    perl "$shared_dir/append_D_block.pl" 1 dz data
     if ! nrg > log 2>&1; then echo "$dir: abnormal termination"; tail -20 log; exit 1; fi
     [ -f DONE ] || { echo "$dir: no DONE"; exit 1; }
   )

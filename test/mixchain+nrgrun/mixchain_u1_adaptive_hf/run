@@ -1,0 +1,50 @@
+#!/bin/bash
+set -euo pipefail
+# $1 = PROJECT_SOURCE_DIR, $2 = PROJECT_BINARY_DIR, $3 = this directory
+#
+# mixchain_qs_adaptive_hf with a matrix chain: three runs at z = 0.5 and 0.5 +- 1e-4 of the SIAM of
+# mixchain_u1_rotated through the SIAM/U1 template with pol2x2. mixchain writes the chain at z and at z + dz into dz/,
+# stage_U1.pl stages both into the four coefficient sets, append_D_block.pl appends the D block, and compare_hf.pl
+# compares dE/dz of the middle run with the central differences.
+source_dir=$1
+build_dir=$2
+test_dir=$3
+shared_dir=$(cd "$(dirname "$test_dir")" && pwd)
+export PATH="$build_dir/tools:$build_dir/c++:$PATH"
+
+z=0.5
+dz=1e-4
+zm=$(perl -e "print $z - $dz")
+zp=$(perl -e "print $z + $dz")
+
+# A run at Z whose D block holds the chain at Z + SHIFT.
+run() { # run DIR Z SHIFT
+  local dir=$1 zz=$2 shift=$3
+  rm -rf "$dir"
+  mkdir "$dir"
+  cp -r "$shared_dir/templates/U1/." "$dir/"
+  sed "s/@Z@/$zz/" "$test_dir/param" > "$dir/param"
+  sed "s/@Z@/$zz/; s/@DZ@/$shift/" "$test_dir/param-mixchain" > "$dir/param-mixchain"
+  (
+    cd "$dir"
+    bash "$shared_dir/mixchain_u1_rotated/make_input.sh" > make_input.log
+    mixchain param-mixchain > mixchain.log 2>&1 || { echo "$dir: mixchain failed"; tail -20 mixchain.log; exit 1; }
+    # A constant rotation of the bands: Theta is the integral of Gamma, and the two chains differ smoothly.
+    grep -q "^# dz=.*||Theta(z+dz)-Theta(z)||" mixchain.log || { echo "$dir: no comparison of the chains"; exit 1; }
+    if grep -q "warning:" mixchain.log; then echo "$dir: mixchain warned"; grep "warning:" mixchain.log; exit 1; fi
+    perl "$shared_dir/stage_U1.pl" > stage.log
+    perl "$shared_dir/stage_U1.pl" dz >> stage.log
+    # One impurity coupling for all runs: the initial cluster must not depend on z.
+    [ "$dir" = z0 ] || cp ../z0/V111.dat ../z0/V121.dat ../z0/V211.dat ../z0/V221.dat .
+    ./instantiate > instantiate.log
+    perl "$shared_dir/append_D_block.pl" 4 dz data
+    if ! nrg > log 2>&1; then echo "$dir: abnormal termination"; tail -20 log; exit 1; fi
+    [ -f DONE ] || { echo "$dir: no DONE"; exit 1; }
+  )
+}
+run z0 "$z"  "$dz"
+run zm "$zm" "$dz"
+run zp "$zp" "-$dz"
+
+echo "=== comparison"
+perl "$source_dir/test/adaptive/compare_hf.pl" --lambda=2.0 --dz="$dz" --tol=1e-3 --gap=1e-3 zm/dEdz.nrg z0/dEdz.nrg zp/dEdz.nrg

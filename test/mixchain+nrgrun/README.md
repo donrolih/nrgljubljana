@@ -22,6 +22,7 @@ refreshed reference would otherwise absorb unnoticed.
 | `mixchain_u1` | ref | `diag(1/2, 1/4)`, field along z, U1 with `pol2x2` | `SYM_ALL` |
 | `mixchain_u1_rotated` | ref | two bands of different shape, turned by pi/3, field tilted with them | `SYM_ALL` |
 | `mixchain_u1_rotation` | pair | those two runs against each other, through the rotation identity | `SYM_ALL` |
+| `mixchain_u1_adaptive_hf` | pair | the Gamma and field of `mixchain_u1_rotated` at z = 0.5 and 0.5 ± 1e-4, U1 with `pol2x2`: the Hellmann–Feynman check of `mixchain_qs_adaptive_hf` with a matrix chain, whose mixing sets enter dH/dz | `SYM_ALL` |
 | `mixchain_spsu2` | ref | an s-wave BCS bath in Nambu form, `chain_gauge=nambu`, SPSU2 | `SYM_MORE` |
 | `mixchain_spsu2_nrginit_legacy`, `mixchain_spsu2_nrginit_rkpw` | pair | the same physics through `nrginit` with `bcsgap` | selected chain backends, `SYM_MORE` and Mathematica |
 
@@ -30,6 +31,10 @@ work directory and reruns both physical routes, without using another test's out
 nrginit route selects the backend; mixchain has a single method, plane rotations in double precision. The SC initializer route uses full
 `tri=old` or `tri=rkpw` with constant `bcsgap`, not a runtime star handoff. The registrations carry `chain-legacy`
 or `chain-rkpw` labels.
+
+The adaptive tests stage mixchain's `dz/` with the same `stage_<SYM>.pl` and append the `D` block with
+`append_D_block.pl`, which writes the staged sets in the layout of the template's `z` block. They give every run the
+impurity coupling of the middle one, since the initial cluster must not depend on z.
 
 `mixchain_u1` leaves the mixing sets `xi3`, `xi4` vanishing, since two flat bands of unequal height share their chain
 coefficients and a rotation cannot mix what is proportional to the identity. The rotated cases therefore give the two

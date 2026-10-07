@@ -1,0 +1,31 @@
+# adaptive_hf with a matrix chain: the SIAM of mixchain_u1_rotated (two spin bands of different shape, turned by
+# pi/3, and the field turned with them) through the SIAM/U1 template with pol2x2, with no truncation, so that dE/dz
+# must agree with finite differences of the energies in z. The mixing sets xi3 and xi4 do not vanish, so their
+# derivatives enter dH/dz. The run script fills in z.
+#
+# Read by the template's instantiate (Nmax, polarized), by matrix (the [extra] section, as param.extra) and by nrg
+# (the [param] section).
+
+[extra]
+U1=0.1
+eps1=-0.05
+Bz1=0.01
+Bx1=0.017320508075688773
+
+[param]
+symtype=U1
+pol2x2=true
+Lambda=2.0
+z=@Z@
+Nmax=4
+
+keep=1000000
+keepenergy=-1
+T=1e-4
+ops=n_d
+data_has_rescaled_energies=false
+
+adaptive_broadening=true
+adaptive_broadening_dumpenergies=true
+emin=1e-12
+emax=10
