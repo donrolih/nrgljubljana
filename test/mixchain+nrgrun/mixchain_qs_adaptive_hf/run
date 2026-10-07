@@ -1,0 +1,53 @@
+#!/bin/bash
+set -euo pipefail
+# $1 = PROJECT_SOURCE_DIR, $2 = PROJECT_BINARY_DIR, $3 = this directory
+#
+# adaptive_hf (test/adaptive) with the chains from mixchain: three runs at z = 1 and 1 +- 1e-4. mixchain writes the
+# chain at z and, with adaptive_broadening, the chain at z + dz into dz/ with dz/dz.dat; both are staged for the
+# SIAM/QS template, and the run script appends the D block from dz/. The middle run takes a forward step to z = 1 +
+# 1e-4, so the check covers the discretization above z = 1, which must continue smoothly the one below it.
+source_dir=$1
+build_dir=$2
+test_dir=$3
+shared_dir=$(cd "$(dirname "$test_dir")" && pwd)
+export PATH="$build_dir/tools:$build_dir/c++:$PATH"
+
+z=1
+dz=1e-4
+zm=$(perl -e "print $z - $dz")
+zp=$(perl -e "print $z + $dz")
+
+# A run at Z whose D block holds the chain at Z + SHIFT.
+run() { # run DIR Z SHIFT
+  local dir=$1 zz=$2 shift=$3
+  rm -rf "$dir"
+  mkdir "$dir"
+  cp -r "$shared_dir/templates/QS/." "$dir/"
+  sed "s/@Z@/$zz/" "$test_dir/param" > "$dir/param"
+  sed "s/@Z@/$zz/; s/@DZ@/$shift/" "$test_dir/param-mixchain" > "$dir/param-mixchain"
+  (
+    cd "$dir"
+    sh "$shared_dir/mixchain_qs/make_input.sh"
+    mixchain param-mixchain > mixchain.log 2>&1 || { echo "$dir: mixchain failed"; tail -20 mixchain.log; exit 1; }
+    for f in dz/star.dat dz/chain.dat dz/dz.dat; do [ -s "$f" ] || { echo "$dir: $f is missing"; exit 1; }; done
+    perl "$shared_dir/stage_QS.pl" > stage.log
+    perl "$shared_dir/stage_QS.pl" dz >> stage.log
+    # One hybridization for all runs: the initial cluster must not depend on z. The star's theta depends on z only
+    # through the weight below the lowest interval, here 2^-40.
+    [ "$dir" = z0 ] || cp ../z0/theta1.dat .
+    ./instantiate > instantiate.log
+    nmax=$(grep -c . xi1.dat); nmax=$((nmax - 1))
+    { echo "D $(cat dz/dz.dat)"; echo "$nmax"; cat dz/xi1.dat; echo "$nmax"; cat dz/zeta1.dat; } >> data
+    if ! nrg > log 2>&1; then echo "$dir: abnormal termination"; tail -20 log; exit 1; fi
+    [ -f DONE ] || { echo "$dir: no DONE"; exit 1; }
+  )
+}
+run z0 "$z"  "$dz"   # forward, to z' above 1
+run zm "$zm" "$dz"
+run zp "$zp" "-$dz"  # the main chain above 1
+
+grep -q "warning: z=$zp is above 1" zp/mixchain.log || { echo "zp: no warning for z above 1"; exit 1; }
+if grep -q "warning: z=" z0/mixchain.log; then echo "z0: a warning for the perturbed star"; exit 1; fi
+
+echo "=== comparison"
+perl "$source_dir/test/adaptive/compare_hf.pl" --lambda=2.0 --dz="$dz" --tol=1e-3 --gap=1e-3 zm/dEdz.nrg z0/dEdz.nrg zp/dEdz.nrg

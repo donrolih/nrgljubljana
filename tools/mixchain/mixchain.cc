@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -166,6 +167,9 @@ struct Configuration {
   bool mmax_from_nmax{};
   ChainOptions chain;
   bool discretization_files{}; // write the chain also as one file per matrix element, beside chain.dat
+  // adaptive_broadening: the star and chain also at z' = z + dz, into dz/ beside the files for z
+  std::optional<double> adaptive_dz;
+  bool adaptive_dz_default{};
 };
 
 auto builds_star(const Mode mode) { return mode != Mode::Chain; }
@@ -230,8 +234,22 @@ void read_chain_configuration(const Params &P, Configuration &configuration) {
     throw std::invalid_argument("nambu_tolerance must be a positive finite number.");
 }
 
+// Both stages need it: the star stage to discretize at z', the chain stage to find the perturbed star and check its z.
+void read_adaptive_configuration(const Params &P, const CommandLineOptions &command_line,
+                                 Configuration &configuration) {
+  if (!P.Pbool("adaptive_broadening", false)) return;
+  configuration.adaptive_dz_default = !P.contains("adaptive_broadening_dz");
+  // Backward by default, which keeps z' in (0,1]; 0.01 of the spacing of the values of z, as in the paper.
+  const auto default_dz = command_line.Nz ? -0.01 / *command_line.Nz : -0.01;
+  const auto dz         = P.P("adaptive_broadening_dz", default_dz);
+  if (!(std::isfinite(dz) && dz != 0.0))
+    throw std::invalid_argument("adaptive_broadening_dz must be a nonzero finite number.");
+  configuration.adaptive_dz = dz;
+}
+
 Configuration read_configuration(const Params &P, const CommandLineOptions &command_line) {
   Configuration configuration;
+  read_adaptive_configuration(P, command_line, configuration);
   if (builds_star(command_line.mode)) read_star_configuration(P, command_line, configuration);
   if (builds_chain(command_line.mode)) read_chain_configuration(P, configuration);
   return configuration;
@@ -265,6 +283,14 @@ void report_configuration(const Configuration &configuration, const CommandLineO
     report.value("chain_gauge", chain_gauge_name(configuration.chain.gauge));
     if (configuration.chain.gauge == ChainGauge::nambu)
       report.value("nambu_tolerance", configuration.chain.nambu_tolerance);
+  }
+  report.value("adaptive_broadening", configuration.adaptive_dz.has_value());
+  if (configuration.adaptive_dz) {
+    if (configuration.adaptive_dz_default)
+      report.resolved("adaptive_broadening_dz", *configuration.adaptive_dz,
+                      command_line.Nz ? "-0.01/Nz" : "-0.01 for a single z");
+    else
+      report.value("adaptive_broadening_dz", *configuration.adaptive_dz);
   }
   report.write(std::cerr);
 }
@@ -351,20 +377,53 @@ template<typename S> void report_star(const Star<S> &star, std::ostream &out) {
 }
 
 // One value of z and the directory its files go to: the working directory for a single z, and i/ for z = i/Nz.
+// With adaptive_broadening, each is followed by its perturbed companion at z' = z + dz, in the subdirectory dz/.
 struct Target {
   // The z to discretize for. In the chain stage of a single-z run it is empty, since the star records its own z.
   std::optional<double> z;
   std::filesystem::path directory;
+  bool perturbed{};
 
   [[nodiscard]] auto file(const char *name) const { return (directory / name).string(); }
+  // For a perturbed companion, the file of the target it belongs to.
+  [[nodiscard]] auto main_file(const char *name) const { return (directory.parent_path() / name).string(); }
 };
 
-std::vector<Target> targets(const CommandLineOptions &command_line, const std::optional<double> single_z) {
-  if (!command_line.Nz) return {Target{single_z, {}}};
+inline constexpr auto perturbed_directory = "dz";
+inline constexpr auto dz_filename         = "dz.dat";
+
+std::vector<Target> targets(const CommandLineOptions &command_line, const std::optional<double> single_z,
+                            const std::optional<double> adaptive_dz) {
   std::vector<Target> list;
+  const auto add = [&](const std::optional<double> z, const std::filesystem::path &directory) {
+    list.push_back(Target{z, directory});
+    if (adaptive_dz)
+      list.push_back(Target{z ? std::optional(*z + *adaptive_dz) : std::nullopt, directory / perturbed_directory, true});
+  };
+  if (!command_line.Nz) {
+    add(single_z, {});
+    return list;
+  }
   for (unsigned int i = 1; i <= *command_line.Nz; i++)
-    list.push_back(Target{static_cast<double>(i) / *command_line.Nz, std::to_string(i)});
+    add(static_cast<double>(i) / *command_line.Nz, std::to_string(i));
   return list;
+}
+
+// The heading of the lines of one target, when there is more than one. In the chain stage of a single-z run the z of
+// the perturbed star is not known before it is loaded.
+void print_heading(const Target &target) {
+  if (target.directory.empty()) return;
+  std::cout << "# ---";
+  if (target.z) std::cout << " z=" << *target.z;
+  std::cout << " in " << target.directory.string() << "/" << std::endl;
+}
+
+// The signed shift z' - z, which nrginit reads from dz/dz.dat (tri=manual with adaptive_broadening).
+void save_dz(const double dz, const std::string &filename) {
+  std::ofstream out(filename);
+  if (!out) throw std::runtime_error("Cannot open " + filename + " for writing.");
+  out << std::setprecision(17) << dz << std::endl;
+  if (!out) throw std::runtime_error("Failed to write " + filename + ".");
 }
 
 auto seconds_since(const std::chrono::steady_clock::time_point start) {
@@ -387,9 +446,10 @@ template<typename S> void run_star(const Configuration &configuration, const std
 
   for (const auto &target : list) {
     const auto start = std::chrono::steady_clock::now();
-    if (!target.directory.empty()) std::cout << "# --- z=" << *target.z << " in " << target.directory.string() << "/" << std::endl;
-    // Above 1 the top interval is wider than one step of Lambda; the stars average to Gamma only for z in (0,1].
-    if (*target.z > 1.0)
+    print_heading(target);
+    // Above 1 the top interval is wider than one step of Lambda; the stars average to Gamma only for z in (0,1]. A
+    // perturbed star is not averaged, it only gives the derivative in z.
+    if (*target.z > 1.0 && !target.perturbed)
       std::cerr << "mixchain: warning: z=" << *target.z << " is above 1, where the top interval is wider than one step "
                 << "of Lambda; z-averaging needs z in (0,1]." << std::endl;
     const auto star = discretizer.star(*target.z);
@@ -398,6 +458,10 @@ template<typename S> void run_star(const Configuration &configuration, const std
     const auto filename = target.file(star_default_filename);
     save_star(star, filename);
     std::cout << "# star written to " << filename << std::endl;
+    if (target.perturbed) {
+      save_dz(*configuration.adaptive_dz, target.file(dz_filename));
+      std::cout << "# dz written to " << target.file(dz_filename) << std::endl;
+    }
     std::cout << "# star z=" << star.z << ": " << seconds_since(start) << " s" << std::endl;
   }
 }
@@ -405,10 +469,12 @@ template<typename S> void run_star(const Configuration &configuration, const std
 // The star is self-contained: the chain is built with the Lambda, z and bandrescale it records. A parameter file that
 // sets Lambda or bandrescale to something else was meant for a different star, so that is an error rather than a
 // silent choice. The z must be the one asked for: i/Nz with --Nz, otherwise the z of the parameter file if it gives one.
+// A perturbed star must lie at z + adaptive_broadening_dz from the star it belongs to.
 template<typename S>
 void check_star_against_parameters(const Star<S> &star, const Params &P, const Target &target,
-                                   const std::string &filename) {
-  const auto check = [&](const std::string &name, const double recorded, const double requested, const char *source) {
+                                   const std::string &filename, const std::optional<double> adaptive_dz) {
+  const auto check = [&](const std::string &name, const double recorded, const double requested,
+                         const std::string &source) {
     if (std::abs(requested - recorded) <= 1e-12 * std::max(1.0, std::abs(recorded))) return;
     std::ostringstream message;
     message << std::setprecision(17) << "The star in " << filename << " was built with " << name << "=" << recorded
@@ -418,7 +484,11 @@ void check_star_against_parameters(const Star<S> &star, const Params &P, const T
   if (P.contains("Lambda")) check("Lambda", star.Lambda, P.P("Lambda", star.Lambda), "the parameter file");
   if (P.contains("bandrescale"))
     check("bandrescale", star.bandrescale, P.P("bandrescale", star.bandrescale), "the parameter file");
-  if (target.z)
+  if (target.perturbed) {
+    const auto main_file = target.main_file(star_default_filename);
+    check("z", star.z, read_star_header(main_file).z + *adaptive_dz,
+          "the star in " + main_file + " shifted by adaptive_broadening_dz");
+  } else if (target.z)
     check("z", star.z, *target.z, "--Nz");
   else if (P.contains("z"))
     check("z", star.z, P.P("z", star.z), "the parameter file");
@@ -480,9 +550,9 @@ void report_chain(const Chain<S> &chain, const ChainFileHeader &header, const do
 template<typename S0> void run_chain(const Configuration &configuration, const Params &P, const Target &target) {
   const auto start     = std::chrono::steady_clock::now();
   const auto star_file = target.file(star_default_filename);
-  if (!target.directory.empty()) std::cout << "# --- z=" << *target.z << " in " << target.directory.string() << "/" << std::endl;
+  print_heading(target);
   const auto star = load_star<S0>(star_file);
-  check_star_against_parameters(star, P, target, star_file);
+  check_star_against_parameters(star, P, target, star_file, configuration.adaptive_dz);
   const auto chain_file = target.file(chain_default_filename);
   const ChainFileHeader header{star.z, star.Lambda, star.bandrescale,
                                star.untabulated_known ? star.untabulated_from : 0.0,
@@ -517,7 +587,7 @@ void run(const CommandLineOptions &command_line) {
 
   if (builds_star(command_line.mode))
     timed("star", [&] {
-      const auto list = targets(command_line, configuration.star.z);
+      const auto list = targets(command_line, configuration.star.z, configuration.adaptive_dz);
       if (gamma_is_complex(configuration.gamma))
         run_star<std::complex<double>>(configuration, list);
       else
@@ -525,7 +595,7 @@ void run(const CommandLineOptions &command_line) {
     });
   if (builds_chain(command_line.mode))
     timed("chain", [&] {
-      for (const auto &target : targets(command_line, std::nullopt)) {
+      for (const auto &target : targets(command_line, std::nullopt, configuration.adaptive_dz)) {
         if (star_is_complex(target.file(star_default_filename)))
           run_chain<std::complex<double>>(configuration, P, target);
         else

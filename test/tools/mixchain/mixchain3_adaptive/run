@@ -1,0 +1,71 @@
+#!/bin/sh
+# mixchain with adaptive_broadening writes, beside the files for z, the star and chain at z' = z + dz into dz/, with
+# the signed dz in dz/dz.dat. Those files must be exactly the ones a plain run at z' writes, for a single z and with
+# --Nz, for the default dz (backward, -0.01/Nz) and for a given one (here forward, past z = 1).
+set -eu
+export PATH="$1:$PATH"
+rm -rf single single_plain nz nz_plain_* bad
+
+# A Gamma that is not flat, so that the chain depends on z beyond a rescaling.
+gamma() { awk 'BEGIN { for (k = -100; k <= 100; k++) { w = k / 100; printf "%.17g %.17g\n", w, 0.5 + 0.2 * w * w } }' >Gamma_11-re.dat; }
+
+# same DIR_A DIR_B: the star, the chain and the per-element files agree, apart from the timing comments.
+same() {
+  for f in star.dat chain.dat V11.dat T11.dat E11.dat; do
+    [ -s "$1/$f" ] || { echo "$1/$f is missing"; exit 1; }
+    grep -v '^#' "$1/$f" >a.tmp
+    grep -v '^#' "$2/$f" >b.tmp
+    cmp -s a.tmp b.tmp || { echo "$1/$f and $2/$f differ"; diff a.tmp b.tmp | head; exit 1; }
+  done
+  rm -f a.tmp b.tmp
+}
+
+# plain DIR PERTURBED: a run without adaptive_broadening at the z of the star in PERTURBED, as its header records it to
+# every digit, so that the two runs discretize for the same double.
+plain() {
+  zz=$(sed -n 's/^# channels=.* z=\([^ ]*\) .*/\1/p' "$2/star.dat")
+  mkdir "$1"
+  (cd "$1" && gamma && sed "s/^z=.*/z=$zz/" ../param >param && mixchain param >mixchain.log 2>&1)
+}
+
+# is_dz FILE VALUE: FILE holds VALUE.
+is_dz() { awk -v v="$2" '{ if ($1 != v) { print FILENAME ": " $1 " instead of " v; exit 1 } }' "$1"; }
+
+# A single z, forward past z = 1 with a given dz.
+mkdir single
+(cd single && gamma && sed "s/^z=.*/z=1/" ../param >param \
+  && printf 'adaptive_broadening=true\nadaptive_broadening_dz=0.0025\n' >>param && mixchain -v param >mixchain.log 2>&1)
+grep -q "adaptive_broadening_dz=0.0025" single/mixchain.log
+is_dz single/dz/dz.dat 0.0025
+grep -q "^# channels=1 mMAX=30 z=1.002" single/dz/star.dat
+plain single_plain single/dz
+same single/dz single_plain
+# The perturbed star is not z-averaged, so it carries no warning for z above 1.
+if grep -q "warning: z=" single/mixchain.log; then echo "single: a warning for the perturbed star"; exit 1; fi
+
+# --Nz 2 with the default dz = -0.01/2: z = 0.5 and 1, z' = 0.495 and 0.995.
+mkdir nz
+(cd nz && gamma && cp ../param . && printf 'adaptive_broadening=true\n' >>param && mixchain -v --Nz 2 param >mixchain.log 2>&1)
+grep -q "adaptive_broadening_dz=auto -> -0.005" nz/mixchain.log
+for i in 1 2; do is_dz nz/$i/dz/dz.dat -0.005; done
+grep -q "^# channels=1 mMAX=30 z=0.49" nz/1/dz/star.dat
+grep -q "^# channels=1 mMAX=30 z=0.99" nz/2/dz/star.dat
+plain nz_plain_1 nz/1/dz
+plain nz_plain_2 nz/2/dz
+same nz/1/dz nz_plain_1
+same nz/2/dz nz_plain_2
+
+# The stages separately: 'l' finds the perturbed stars and checks their z against the main star shifted by dz, so a
+# parameter file with another dz is refused.
+(cd nz && mixchain --Nz 2 l param >chain.log 2>&1)
+same nz/1/dz nz_plain_1
+(cd nz && cp param param-other && printf 'adaptive_broadening_dz=-0.01\n' >>param-other)
+if (cd nz && mixchain --Nz 2 l param-other >other.log 2>&1); then echo "nz: another dz was accepted"; exit 1; fi
+grep -q "shifted by adaptive_broadening_dz" nz/other.log
+
+# dz = 0 is refused.
+mkdir bad
+(cd bad && gamma && cp ../param . && printf 'adaptive_broadening=true\nadaptive_broadening_dz=0\n' >>param)
+if (cd bad && mixchain param >mixchain.log 2>&1); then echo "bad: dz=0 was accepted"; exit 1; fi
+grep -q "adaptive_broadening_dz must be a nonzero finite number" bad/mixchain.log
+echo "mixchain3_adaptive: ok"

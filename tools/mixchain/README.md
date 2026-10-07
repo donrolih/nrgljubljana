@@ -22,7 +22,7 @@ mixchain [options] [s|l] [parameter_file]
 - `s` runs the star stage: it reads $\Gamma$ and writes `star.dat`.
 - `l` runs the chain stage: it reads `star.dat` and writes `chain.dat`.
 - With neither, both stages run in turn. The chain is built from `star.dat` in this case too, so the default mode and `s` followed by `l` give the same chain.
-- `--Nz N` runs for $z_i = i/N$, $i = 1,\ldots,N$, with the files for $z_i$ in the directory `i/`. A `z` in the parameter file is then ignored. The star stage does everything that does not depend on $z$ once and shares it between the values of $z$; `l` reads `i/star.dat` and writes `i/chain.dat`, and checks that each star was built for $z_i$.
+- `--Nz N` runs for $z_i = i/N$, $i = 1,\ldots,N$, with the files for $z_i$ in the directory `i/` (and those for $z_i+\delta z$ in `i/dz/` with `adaptive_broadening`). A `z` in the parameter file is then ignored. The star stage does everything that does not depend on $z$ once and shares it between the values of $z$; `l` reads `i/star.dat` and writes `i/chain.dat`, and checks that each star was built for $z_i$.
 - `--epsabs VALUE`, `--epsrel VALUE`, `--workspace-limit N` and `--gsl-error-policy ignore|warn|fail` control the CQUAD integration of the representative energies, with the names, defaults and meaning they have for `adapt --integral`.
 - `-v` writes the resolved configuration to standard error.
 - `-vv` is accepted for uniformity with the other tools and currently reports the same as `-v`.
@@ -110,13 +110,30 @@ is the same.
 | `nambu_tolerance` | `1e-8` | chain | How far a block may depart from the Nambu structure before `chain_gauge=nambu` refuses it. |
 | `rank_tolerance` | `1e-20` | chain | Square of a singular value of a hopping or of $V$, relative to that of the largest, below which the direction counts as lost. |
 | `sensitivity_tolerance` | `1e-10` | chain | Relative change of the chain under a change of the star by one unit in the last place above which a site is reported as not determined by the star; see Sensitivity below. |
+| `adaptive_broadening` | `false` | both | Also discretize at $z'=z+\delta z$, into `dz/`; see Adaptive broadening below. |
+| `adaptive_broadening_dz` | `-0.01/N` with `--Nz N`, else `-0.01` | both | The signed shift $\delta z$. |
 
 `boundary` is a fraction of the rescaled band edge, as in `adapt`: a gap $\Delta$ in the units of the input with
 `bandrescale`$=D$ is `boundary`$=\Delta/D$. The `-v` report prints both values.
 
 The chain stage takes $\Lambda$, $z$ and `bandrescale` from `star.dat`. If the parameter file sets $\Lambda$ or
 `bandrescale` to a different value, the stage stops rather than choose between the two. The same holds for $z$: with
-`--Nz` it must be $i/N$ for the star in `i/`, and otherwise it must match a `z` given in the parameter file.
+`--Nz` it must be $i/N$ for the star in `i/`, and otherwise it must match a `z` given in the parameter file. A star in
+`dz/` must lie at the $z$ of the star it belongs to plus `adaptive_broadening_dz`.
+
+### Adaptive broadening
+
+Adaptive broadening (Lee and Weichselbaum, PRB 94, 235127 (2016)) needs the derivative of the chain with respect to
+$z$, which `nrg` forms from the chain at $z$ and at $z'=z+\delta z$. With `adaptive_broadening=true`, each value of
+$z$ is followed by a second one at $z'$, discretized from the same setup and tridiagonalized with the same
+parameters, and its files go into the subdirectory `dz/` of the directory for $z$: `dz/` for a single $z$, `i/dz/`
+with `--Nz`. They are the files a plain run at $z'$ writes (`star.dat`, `chain.dat`, and the per-element files with
+`discretization_files`), plus `dz.dat`, which holds the signed $\delta z$. This is the layout `nrginit` reads with
+`tri=manual` and `adaptive_broadening` once the chain files are staged there.
+
+The default $\delta z$ is backward, $-0.01/N$ (or $-0.01$ for a single $z$), which keeps $z'$ in $(0,1]$; the paper
+takes $+0.01/N$. A forward step from $z=1$ needs $z'>1$, which the mesh allows (see Mesh). The perturbed stars are not
+meant for $z$-averaging, so they carry no warning for $z>1$.
 
 ## Star stage
 
@@ -381,6 +398,7 @@ is `boundary` times `bandrescale`, and `mesh_weight` is `inactive` without `adap
 | `# tr(theta)= tr(int Gamma)= difference=` | Trace of $\Theta=\sum_k v_k v_k^\dagger$ against the integral of $\Gamma$ over the range the mesh covers; equal by construction. |
 | `# ||theta - int Gamma||/||int Gamma||=` | The same for the whole matrix. The off-diagonal elements agree only approximately, since one level per interval and branch cannot follow a rotating eigenvector. |
 | `# star written to`, `# star z=: t s`, `# star stage: t s` | The file, the wall time of this $z$, and of the whole stage. |
+| `# dz written to` | With `adaptive_broadening`, the file with $\delta z$, after the perturbed star. |
 
 ### Chain, for each $z$
 
@@ -412,6 +430,7 @@ add up site by site, and the ratios of eigenvalues are taken within each block.
 | Line | Meaning |
 | --- | --- |
 | `mixchain: warning: the rank of the hopping drops below r at site n ..., in block {..}` | The levels with nonzero coupling of that block run out before the chain ends, and the chain is zero in the lost direction from site `n+1` on. The others lie where $\Gamma$ vanishes on the mesh (a gap that a fixed or shared mesh does not follow) or collapsed onto an accumulation point, so more `mMAX` does not help; a mesh that follows the block (`adapt=true`, `split_blocks=true`) or a smaller `Nmax` does. |
+| `mixchain: warning: z=... is above 1, ...` | A star for $z>1$, other than the perturbed one of `adaptive_broadening`. Its top interval is wider than one step of $\Lambda$, and the stars average to $\Gamma$ only over $z\in(0,1]$. |
 | `mixchain: warning: Integral method failed at x=...` | A CQUAD failure, reported instead of stopping with `--gsl-error-policy warn`. |
 | `mixchain: error: ...` | The run stops with a nonzero exit status; files of the stages completed before it remain. |
 

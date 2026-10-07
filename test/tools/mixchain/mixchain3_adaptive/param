@@ -1,0 +1,8 @@
+# mixchain with adaptive_broadening: the run script checks that dz/ holds what a plain run at z + dz gives.
+
+[param]
+Lambda=2
+z=0.5
+mMAX=30
+Nmax=12
+discretization_files=true

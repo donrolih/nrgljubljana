@@ -18,6 +18,7 @@ refreshed reference would otherwise absorb unnoticed.
 | --- | --- | --- | --- |
 | `mixchain_qs` | ref | a flat scalar band, QS | always |
 | `mixchain_qs_vs_nrgchain_legacy`, `mixchain_qs_vs_nrgchain_rkpw` | pair | the same band through mixchain and through `nrgchain band=flat` | selected chain backends |
+| `mixchain_qs_adaptive_hf` | pair | the flat band of `mixchain_qs` at z = 1 and 1 ± 1e-4 with `adaptive_broadening`: dE/dz from the `D` block, built from mixchain's `dz/`, against central differences, as `test/adaptive/adaptive_hf`; the middle run steps forward to z > 1 | always |
 | `mixchain_u1` | ref | `diag(1/2, 1/4)`, field along z, U1 with `pol2x2` | `SYM_ALL` |
 | `mixchain_u1_rotated` | ref | two bands of different shape, turned by pi/3, field tilted with them | `SYM_ALL` |
 | `mixchain_u1_rotation` | pair | those two runs against each other, through the rotation identity | `SYM_ALL` |
